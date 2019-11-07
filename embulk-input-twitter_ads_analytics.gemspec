@@ -14,7 +14,10 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   #spec.add_dependency 'YOUR_GEM_DEPENDENCY', ['~> YOUR_GEM_DEPENDENCY_VERSION']
-  spec.add_development_dependency 'embulk', ['>= 0.9.17']
+  spec.add_dependency 'oauth', ['~> 0.5.4']
+  spec.add_dependency 'activesupport', ['~> 5.2.3']
+
+  # spec.add_development_dependency 'embulk', ['>= 0.9.17']
   spec.add_development_dependency 'bundler', ['>= 1.10.6']
   spec.add_development_dependency 'rake', ['>= 10.0']
 end
