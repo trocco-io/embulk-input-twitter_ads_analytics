@@ -15,8 +15,8 @@ module Embulk
         task = {
           "consumer_key" => config.param("consumer_key", :string),
           "consumer_secret" => config.param("consumer_secret", :string),
-          "access_token" => config.param("access_token", :string),
-          "access_token_secret" => config.param("access_token_secret", :string),
+          "oauth_token" => config.param("oauth_token", :string),
+          "oauth_token_secret" => config.param("oauth_token_secret", :string),
           "account_id" => config.param("account_id", :string),
           "entity" => config.param("entity", :string),
           "metric_groups" => config.param("metric_groups", :array),
@@ -88,8 +88,8 @@ module Embulk
         # initialization code:
         @consumer_key = task["consumer_key"]
         @consumer_secret = task["consumer_secret"]
-        @access_token = task["access_token"]
-        @access_token_secret = task["access_token_secret"]
+        @oauth_token = task["oauth_token"]
+        @oauth_token_secret = task["oauth_token_secret"]
         @account_id = task["account_id"]
         @entity = task["entity"]
         @metric_groups = task["metric_groups"]
@@ -107,9 +107,9 @@ module Embulk
       end
 
       def run
-        token = get_token
-        entities = request_entities(token)
-        stats = request_stats(token, entities.map{ |entity| entity["id"] })
+        access_token = get_access_token
+        entities = request_entities(access_token)
+        stats = request_stats(access_token, entities.map{ |entity| entity["id"] })
         stats.each do |item|
           metrics = item["id_data"][0]["metrics"]
           (Date.parse(@start_date)..Date.parse(@end_date)).each_with_index do |date, i|
@@ -138,17 +138,17 @@ module Embulk
         return task_report
       end
 
-      def get_token
+      def get_access_token
         consumer = OAuth::Consumer.new(@consumer_key, @consumer_secret, site: "https://ads-api.twitter.com", scheme: :header)
-        OAuth::AccessToken.from_hash(consumer, oauth_token: @access_token, oauth_token_secret: @access_token_secret)
+        OAuth::AccessToken.from_hash(consumer, oauth_token: @oauth_token, oauth_token_secret: @oauth_token_secret)
       end
   
-      def request_entities(token)
-        response = token.request(:get, "https://ads-api.twitter.com/6/accounts/#{@account_id}/#{entity_plural(@entity).downcase}")
+      def request_entities(access_token)
+        response = access_token.request(:get, "https://ads-api.twitter.com/6/accounts/#{@account_id}/#{entity_plural(@entity).downcase}")
         JSON.parse(response.body)["data"]
       end
 
-      def request_stats(token, entity_ids)
+      def request_stats(access_token, entity_ids)
         params = {
           entity: @entity.upcase,
           entity_ids: entity_ids.join(","),
@@ -158,7 +158,7 @@ module Embulk
           placement: @placement.upcase,
           granularity: @granularity.upcase,
         }
-        response = token.request(:get, "https://ads-api.twitter.com/6/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
+        response = access_token.request(:get, "https://ads-api.twitter.com/6/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
         JSON.parse(response.body)["data"]
       end
 
