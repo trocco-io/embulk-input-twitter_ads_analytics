@@ -18,10 +18,10 @@ module Embulk
           "oauth_token" => config.param("oauth_token", :string),
           "oauth_token_secret" => config.param("oauth_token_secret", :string),
           "account_id" => config.param("account_id", :string),
-          "entity" => config.param("entity", :string),
-          "metric_groups" => config.param("metric_groups", :array),
-          "granularity" => config.param("granularity", :string),
-          "placement" => config.param("placement", :string),
+          "entity" => config.param("entity", :string).upcase,
+          "metric_groups" => config.param("metric_groups", :array).map(&:upcase),
+          "granularity" => config.param("granularity", :string).upcase,
+          "placement" => config.param("placement", :string).upcase,
           "start_date" => config.param("start_date", :string),
           "end_date" => config.param("end_date", :string),
           "timezone" => config.param("timezone", :string),
@@ -45,13 +45,18 @@ module Embulk
       end
 
       def self.guess(config)
-        entity = config.param("entity", :string)
-        metric_groups = config.param("metric_groups", :array)
+        entity = config.param("entity", :string).upcase
+        metric_groups = config.param("metric_groups", :array).map(&:upcase)
         fields = [
           {name: "date", type: "string"},
           {name: "id", type: "string"},
-          {name: "name", type: "string"},
         ]
+        fields += [
+          {name: "name", type: "string"},
+        ] if ["ACCOUNT", "CAMPAIGN", "LINE_ITEM"].include?(entity)
+        fields += [
+          {name: "description", type: "string"},
+        ] if entity == "FUNDING_INSTRUMENT"
         fields += [
           {name: "engagements", type: "long"},
           {name: "impressions", type: "long"},
@@ -64,7 +69,7 @@ module Embulk
           {name: "app_clicks", type: "long"},
           {name: "url_clicks", type: "long"},
           {name: "qualified_impressions", type: "long"},
-        ] if metric_groups.include?("ENGAGEMENT") && entity != "ACCOUNT"
+        ] if metric_groups.include?("ENGAGEMENT") && (entity != "ACCOUNT" && entity != "FUNDING_INSTRUMENT")
         fields += [
           {name: "engagements", type: "long"},
           {name: "impressions", type: "long"},
@@ -72,11 +77,22 @@ module Embulk
           {name: "replies", type: "long"},
           {name: "likes", type: "long"},
           {name: "follows", type: "long"},
-        ] if metric_groups.include?("ENGAGEMENT") && entity == "ACCOUNT"
+        ] if metric_groups.include?("ENGAGEMENT") && (entity == "ACCOUNT" || entity == "FUNDING_INSTRUMENT")
         fields += [
           {name: "billed_engagements", type: "long"},
           {name: "billed_charge_local_micro", type: "long"},
         ] if metric_groups.include?("BILLING")
+        fields += [
+          {name: "video_total_views", type: "long"},
+          {name: "video_views_25", type: "long"},
+          {name: "video_views_50", type: "long"},
+          {name: "video_views_75", type: "long"},
+          {name: "video_views_100", type: "long"},
+          {name: "video_cta_clicks", type: "long"},
+          {name: "video_content_starts", type: "long"},
+          {name: "video_mrc_views", type: "long"},
+          {name: "video_3s100pct_views", type: "long"},
+        ] if metric_groups.include?("VIDEO")
         fields += [
           {name: "media_views", type: "long"},
           {name: "media_engagements", type: "long"},
@@ -109,7 +125,10 @@ module Embulk
       def run
         access_token = get_access_token
         entities = request_entities(access_token)
-        stats = request_stats(access_token, entities.map{ |entity| entity["id"] })
+        stats = []
+        entities.each_slice(10) do |chunked_entities|
+          stats += request_stats(access_token, chunked_entities.map{ |entity| entity["id"] })
+        end
         stats.each do |item|
           metrics = item["id_data"][0]["metrics"]
           (Date.parse(@start_date)..Date.parse(@end_date)).each_with_index do |date, i|
@@ -121,6 +140,8 @@ module Embulk
                 page << date.to_s
               elsif field["name"] == "name"
                 page << entities.find { |entity| entity["id"] == item["id"] }["name"]
+              elsif field["name"] == "description"
+                page << entities.find { |entity| entity["id"] == item["id"] }["description"]
               else
                 unless metrics[field["name"]]
                   page << nil
@@ -144,21 +165,32 @@ module Embulk
       end
   
       def request_entities(access_token)
-        response = access_token.request(:get, "https://ads-api.twitter.com/6/accounts/#{@account_id}/#{entity_plural(@entity).downcase}")
+        url = "https://ads-api.twitter.com/6/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
+        url = "https://ads-api.twitter.com/6/accounts/#{@account_id}" if @entity == "ACCOUNT"
+        response = access_token.request(:get, url)
+        if response.code != "200"
+          Embulk.logger.error "#{response.body}"
+          raise
+        end
+        return [JSON.parse(response.body)["data"]] if @entity == "ACCOUNT"
         JSON.parse(response.body)["data"]
       end
 
       def request_stats(access_token, entity_ids)
         params = {
-          entity: @entity.upcase,
+          entity: @entity,
           entity_ids: entity_ids.join(","),
           metric_groups: @metric_groups.join(","),
           start_time: @start_time,
           end_time: @end_time,
-          placement: @placement.upcase,
-          granularity: @granularity.upcase,
+          placement: @placement,
+          granularity: @granularity,
         }
         response = access_token.request(:get, "https://ads-api.twitter.com/6/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
+        if response.code != "200"
+          Embulk.logger.error "#{response.body}"
+          raise
+        end
         JSON.parse(response.body)["data"]
       end
 
@@ -170,8 +202,8 @@ module Embulk
           "LINE_ITEMS"
         when "PROMOTED_TWEET"
           "PROMOTED_TWEETS"
-        when "MEDIA_CREATIVE"
-          "MEDIA_CREATIVES"
+        # when "MEDIA_CREATIVE"
+        #   "MEDIA_CREATIVES"
         when "ACCOUNT"
           "ACCOUNTS"
         when "FUNDING_INSTRUMENT"
