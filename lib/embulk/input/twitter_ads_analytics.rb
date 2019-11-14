@@ -26,12 +26,12 @@ module Embulk
           "end_date" => config.param("end_date", :string),
           "timezone" => config.param("timezone", :string),
           "async" => config.param("timezone", :bool),
-          "fields" => config.param("fields", :array),
+          "columns" => config.param("columns", :array),
         }
 
         columns = []
-        task["fields"].each_with_index do |field, i|
-          columns << Column.new(i, field["name"], field["type"].to_sym)
+        task["columns"].each_with_index do |column, i|
+          columns << Column.new(i, column["name"], column["type"].to_sym)
         end
 
         resume(task, columns, 1, &control)
@@ -47,17 +47,26 @@ module Embulk
       def self.guess(config)
         entity = config.param("entity", :string).upcase
         metric_groups = config.param("metric_groups", :array).map(&:upcase)
-        fields = [
+        columns = [
           {name: "date", type: "string"},
-          {name: "id", type: "string"},
         ]
-        fields += [
-          {name: "name", type: "string"},
-        ] if ["ACCOUNT", "CAMPAIGN", "LINE_ITEM"].include?(entity)
-        fields += [
+        columns += [
+          {name: "account_id", type: "string"},
+          {name: "account_name", type: "string"},
+        ] if entity == "ACCOUNT"
+        columns += [
+          {name: "campaign_id", type: "string"},
+          {name: "campaign_name", type: "string"},
+        ] if entity == "CAMPAIGN"
+        columns += [
+          {name: "line_item_id", type: "string"},
+          {name: "line_item_name", type: "string"},
+        ] if entity == "LINE_ITEM"
+        columns += [
+          {name: "funding_instrument_id", type: "string"},
           {name: "description", type: "string"},
         ] if entity == "FUNDING_INSTRUMENT"
-        fields += [
+        columns += [
           {name: "engagements", type: "long"},
           {name: "impressions", type: "long"},
           {name: "retweets", type: "long"},
@@ -70,7 +79,7 @@ module Embulk
           {name: "url_clicks", type: "long"},
           {name: "qualified_impressions", type: "long"},
         ] if metric_groups.include?("ENGAGEMENT") && (entity != "ACCOUNT" && entity != "FUNDING_INSTRUMENT")
-        fields += [
+        columns += [
           {name: "engagements", type: "long"},
           {name: "impressions", type: "long"},
           {name: "retweets", type: "long"},
@@ -78,11 +87,11 @@ module Embulk
           {name: "likes", type: "long"},
           {name: "follows", type: "long"},
         ] if metric_groups.include?("ENGAGEMENT") && (entity == "ACCOUNT" || entity == "FUNDING_INSTRUMENT")
-        fields += [
+        columns += [
           {name: "billed_engagements", type: "long"},
           {name: "billed_charge_local_micro", type: "long"},
         ] if metric_groups.include?("BILLING")
-        fields += [
+        columns += [
           {name: "video_total_views", type: "long"},
           {name: "video_views_25", type: "long"},
           {name: "video_views_50", type: "long"},
@@ -93,11 +102,11 @@ module Embulk
           {name: "video_mrc_views", type: "long"},
           {name: "video_3s100pct_views", type: "long"},
         ] if metric_groups.include?("VIDEO")
-        fields += [
+        columns += [
           {name: "media_views", type: "long"},
           {name: "media_engagements", type: "long"},
         ] if metric_groups.include?("MEDIA")
-        return {"fields" => fields}
+        return {"columns" => columns}
       end
 
       def init
@@ -115,7 +124,7 @@ module Embulk
         @end_date = task["end_date"]
         @timezone = task["timezone"]
         @async = task["async"]
-        @fields = task["fields"]
+        @columns = task["columns"]
 
         Time.zone = @timezone
       end
@@ -138,20 +147,20 @@ module Embulk
           metrics = item["id_data"][0]["metrics"]
           (Date.parse(item["start_date"])..Date.parse(item["end_date"])).each_with_index do |date, i|
             page = []
-            @fields.each do |field|
-              if field["name"] == "id"
+            @columns.each do |column|
+              if ["account_id", "campaign_id", "line_item_id", "funding_instrument_id"].include?(column["name"])
                 page << item["id"]
-              elsif field["name"] == "date"
+              elsif column["name"] == "date"
                 page << date.to_s
-              elsif field["name"] == "name"
+              elsif ["account_name", "campaign_name", "line_item_name"].include?(column["name"])
                 page << entities.find { |entity| entity["id"] == item["id"] }["name"]
-              elsif field["name"] == "description"
+              elsif column["name"] == "description"
                 page << entities.find { |entity| entity["id"] == item["id"] }["description"]
               else
-                unless metrics[field["name"]]
+                unless metrics[column["name"]]
                   page << nil
                 else
-                  page << metrics[field["name"]][i]
+                  page << metrics[column["name"]][i]
                 end
               end
             end
