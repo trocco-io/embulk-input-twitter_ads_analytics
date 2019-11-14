@@ -126,12 +126,12 @@ module Embulk
         stats = []
         entities.each_slice(10) do |chunked_entities|
           chunked_times.each do |chunked_time|
-            stat = request_stats(access_token, chunked_entities.map{ |entity| entity["id"] }, chunked_time)
-            stat.each do |s|
-              s["start_date"] = chunked_time[:start_date]
-              s["end_date"] = chunked_time[:end_date]
+            response = request_stats(access_token, chunked_entities.map{ |entity| entity["id"] }, chunked_time)
+            response.each do |row|
+              row["start_date"] = chunked_time[:start_date]
+              row["end_date"] = chunked_time[:end_date]
             end
-            stats += stat
+            stats += response
           end
         end
         stats.each do |item|
@@ -218,8 +218,6 @@ module Embulk
           "LINE_ITEMS"
         when "PROMOTED_TWEET"
           "PROMOTED_TWEETS"
-        # when "MEDIA_CREATIVE"
-        #   "MEDIA_CREATIVES"
         when "ACCOUNT"
           "ACCOUNTS"
         when "FUNDING_INSTRUMENT"
