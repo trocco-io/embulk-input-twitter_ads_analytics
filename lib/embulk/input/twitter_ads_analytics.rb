@@ -31,7 +31,7 @@ module Embulk
 
         columns = []
         task["columns"].each_with_index do |column, i|
-          columns << Column.new(i, column["name"], column["type"].to_sym)
+          columns << Column.new(i, column["name"], column["type"].to_sym, column["format"])
         end
 
         resume(task, columns, 1, &control)
@@ -48,7 +48,7 @@ module Embulk
         entity = config.param("entity", :string).upcase
         metric_groups = config.param("metric_groups", :array).map(&:upcase)
         columns = [
-          {name: "date", type: "string"},
+          {name: "date", type: "timestamp", format: "%Y-%m-%d"},
         ]
         columns += [
           {name: "account_id", type: "string"},
@@ -151,7 +151,7 @@ module Embulk
               if ["account_id", "campaign_id", "line_item_id", "funding_instrument_id"].include?(column["name"])
                 page << item["id"]
               elsif column["name"] == "date"
-                page << date.to_s
+                page << Time.zone.parse(date.to_s)
               elsif ["account_name", "campaign_name", "line_item_name"].include?(column["name"])
                 page << entities.find { |entity| entity["id"] == item["id"] }["name"]
               elsif column["name"] == "description"
