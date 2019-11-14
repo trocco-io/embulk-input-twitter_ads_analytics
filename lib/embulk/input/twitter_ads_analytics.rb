@@ -118,8 +118,6 @@ module Embulk
         @fields = task["fields"]
 
         Time.zone = @timezone
-        @start_time = Time.zone.parse(@start_date).strftime("%FT%T%z")
-        @end_time = Time.zone.parse(@end_date).tomorrow.strftime("%FT%T%z")
       end
 
       def run
@@ -127,11 +125,18 @@ module Embulk
         entities = request_entities(access_token)
         stats = []
         entities.each_slice(10) do |chunked_entities|
-          stats += request_stats(access_token, chunked_entities.map{ |entity| entity["id"] })
+          chunked_times.each do |chunked_time|
+            stat = request_stats(access_token, chunked_entities.map{ |entity| entity["id"] }, chunked_time)
+            stat.each do |s|
+              s["start_date"] = chunked_time[:start_date]
+              s["end_date"] = chunked_time[:end_date]
+            end
+            stats += stat
+          end
         end
         stats.each do |item|
           metrics = item["id_data"][0]["metrics"]
-          (Date.parse(@start_date)..Date.parse(@end_date)).each_with_index do |date, i|
+          (Date.parse(item["start_date"])..Date.parse(item["end_date"])).each_with_index do |date, i|
             page = []
             @fields.each do |field|
               if field["name"] == "id"
@@ -176,13 +181,13 @@ module Embulk
         JSON.parse(response.body)["data"]
       end
 
-      def request_stats(access_token, entity_ids)
+      def request_stats(access_token, entity_ids, chunked_time)
         params = {
           entity: @entity,
           entity_ids: entity_ids.join(","),
           metric_groups: @metric_groups.join(","),
-          start_time: @start_time,
-          end_time: @end_time,
+          start_time: chunked_time[:start_time],
+          end_time: chunked_time[:end_time],
           placement: @placement,
           granularity: @granularity,
         }
@@ -192,6 +197,17 @@ module Embulk
           raise
         end
         JSON.parse(response.body)["data"]
+      end
+
+      def chunked_times
+        (Date.parse(@start_date)..Date.parse(@end_date)).each_slice(7).map do |chunked|
+          {
+            start_date: chunked.first.to_s,
+            end_date: chunked.last.to_s,
+            start_time: Time.zone.parse(chunked.first.to_s).strftime("%FT%T%z"),
+            end_time: Time.zone.parse(chunked.last.to_s).tomorrow.strftime("%FT%T%z"),
+          }
+        end
       end
 
       def entity_plural(entity)
