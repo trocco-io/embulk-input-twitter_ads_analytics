@@ -1,7 +1,7 @@
 
 Gem::Specification.new do |spec|
   spec.name          = "embulk-input-twitter_ads_analytics"
-  spec.version       = "0.1.4"
+  spec.version       = "0.1.5"
   spec.authors       = ["naotaka nakane"]
   spec.summary       = "Twitter Ads Analytics input plugin for Embulk"
   spec.description   = "Loads records from Twitter Ads Analytics."
