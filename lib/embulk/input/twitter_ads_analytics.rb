@@ -99,7 +99,6 @@ module Embulk
           {name: "video_views_100", type: "long"},
           {name: "video_cta_clicks", type: "long"},
           {name: "video_content_starts", type: "long"},
-          {name: "video_mrc_views", type: "long"},
           {name: "video_3s100pct_views", type: "long"},
         ] if metric_groups.include?("VIDEO")
         columns += [
@@ -179,8 +178,8 @@ module Embulk
       end
   
       def request_entities(access_token)
-        url = "https://ads-api.twitter.com/7/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
-        url = "https://ads-api.twitter.com/7/accounts/#{@account_id}" if @entity == "ACCOUNT"
+        url = "https://ads-api.twitter.com/8/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
+        url = "https://ads-api.twitter.com/8/accounts/#{@account_id}" if @entity == "ACCOUNT"
         response = access_token.request(:get, url)
         if response.code != "200"
           Embulk.logger.error "#{response.body}"
@@ -200,7 +199,7 @@ module Embulk
           placement: @placement,
           granularity: @granularity,
         }
-        response = access_token.request(:get, "https://ads-api.twitter.com/7/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
+        response = access_token.request(:get, "https://ads-api.twitter.com/8/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
         if response.code != "200"
           Embulk.logger.error "#{response.body}"
           raise
