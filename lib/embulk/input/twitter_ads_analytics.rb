@@ -6,7 +6,6 @@ require "active_support/core_ext/numeric"
 
 module Embulk
   module Input
-
     class TwitterAdsAnalytics < InputPlugin
       Plugin.register_input("twitter_ads_analytics", self)
 
@@ -100,11 +99,58 @@ module Embulk
           {name: "video_cta_clicks", type: "long"},
           {name: "video_content_starts", type: "long"},
           {name: "video_3s100pct_views", type: "long"},
+          {name: "video_6s_views", type: "long"},
+          {name: "video_15s_views", type: "long"},
         ] if metric_groups.include?("VIDEO")
         columns += [
           {name: "media_views", type: "long"},
           {name: "media_engagements", type: "long"},
         ] if metric_groups.include?("MEDIA")
+        columns += [
+          {name: "conversion_purchases", type: "json"},
+          {name: "conversion_sign_ups", type: "json"},
+          {name: "conversion_site_visits", type: "json"},
+          {name: "conversion_downloads", type: "json"},
+          {name: "conversion_custom", type: "json"},
+        ] if metric_groups.include?("WEB_CONVERSION")
+        columns += [
+          {name: "mobile_conversion_spent_credits", type: "json"},
+          {name: "mobile_conversion_installs", type: "json"},
+          {name: "mobile_conversion_content_views", type: "json"},
+          {name: "mobile_conversion_add_to_wishlists", type: "json"},
+          {name: "mobile_conversion_checkouts_initiated", type: "json"},
+          {name: "mobile_conversion_reservations", type: "json"},
+          {name: "mobile_conversion_tutorials_completed", type: "json"},
+          {name: "mobile_conversion_achievements_unlocked", type: "json"},
+          {name: "mobile_conversion_searches", type: "json"},
+          {name: "mobile_conversion_add_to_carts", type: "json"},
+          {name: "mobile_conversion_payment_info_additions", type: "json"},
+          {name: "mobile_conversion_re_engages", type: "json"},
+          {name: "mobile_conversion_shares", type: "json"},
+          {name: "mobile_conversion_rates", type: "json"},
+          {name: "mobile_conversion_logins", type: "json"},
+          {name: "mobile_conversion_updates", type: "json"},
+          {name: "mobile_conversion_levels_achieved", type: "json"},
+          {name: "mobile_conversion_invites", type: "json"},
+          {name: "mobile_conversion_key_page_views", type: "json"},
+        ] if metric_groups.include?("MOBILE_CONVERSION")
+        columns += [
+          {name: "mobile_conversion_lifetime_value_purchases", type: "json"},
+          {name: "mobile_conversion_lifetime_value_sign_ups", type: "json"},
+          {name: "mobile_conversion_lifetime_value_updates", type: "json"},
+          {name: "mobile_conversion_lifetime_value_tutorials_completed", type: "json"},
+          {name: "mobile_conversion_lifetime_value_reservations", type: "json"},
+          {name: "mobile_conversion_lifetime_value_add_to_carts", type: "json"},
+          {name: "mobile_conversion_lifetime_value_add_to_wishlists", type: "json"},
+          {name: "mobile_conversion_lifetime_value_checkouts_initiated", type: "json"},
+          {name: "mobile_conversion_lifetime_value_levels_achieved", type: "json"},
+          {name: "mobile_conversion_lifetime_value_achievements_unlocked", type: "json"},
+          {name: "mobile_conversion_lifetime_value_shares", type: "json"},
+          {name: "mobile_conversion_lifetime_value_invites", type: "json"},
+          {name: "mobile_conversion_lifetime_value_payment_info_additions", type: "json"},
+          {name: "mobile_conversion_lifetime_value_spent_credits", type: "json"},
+          {name: "mobile_conversion_lifetime_value_rates", type: "json"},
+        ] if metric_groups.include?("LIFE_TIME_VALUE_MOBILE_CONVERSION")
         return {"columns" => columns}
       end
 
@@ -134,7 +180,7 @@ module Embulk
         stats = []
         entities.each_slice(10) do |chunked_entities|
           chunked_times.each do |chunked_time|
-            response = request_stats(access_token, chunked_entities.map{ |entity| entity["id"] }, chunked_time)
+            response = request_stats(access_token, chunked_entities.map { |entity| entity["id"] }, chunked_time)
             response.each do |row|
               row["start_date"] = chunked_time[:start_date]
               row["end_date"] = chunked_time[:end_date]
@@ -156,8 +202,10 @@ module Embulk
               elsif column["name"] == "description"
                 page << entities.find { |entity| entity["id"] == item["id"] }["description"]
               else
-                unless metrics[column["name"]]
+                if !metrics[column["name"]]
                   page << nil
+                elsif column["type"] == "json"
+                  page << metrics[column["name"]]
                 else
                   page << metrics[column["name"]][i]
                 end
@@ -176,7 +224,7 @@ module Embulk
         consumer = OAuth::Consumer.new(@consumer_key, @consumer_secret, site: "https://ads-api.twitter.com", scheme: :header)
         OAuth::AccessToken.from_hash(consumer, oauth_token: @oauth_token, oauth_token_secret: @oauth_token_secret)
       end
-  
+
       def request_entities(access_token)
         url = "https://ads-api.twitter.com/9/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
         url = "https://ads-api.twitter.com/9/accounts/#{@account_id}" if @entity == "ACCOUNT"
