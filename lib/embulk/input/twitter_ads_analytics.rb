@@ -9,6 +9,8 @@ module Embulk
     class TwitterAdsAnalytics < InputPlugin
       Plugin.register_input("twitter_ads_analytics", self)
 
+      NUMBER_OF_RETRIES = 5
+
       def self.transaction(config, &control)
         # configuration code:
         task = {
@@ -176,7 +178,10 @@ module Embulk
 
       def run
         access_token = get_access_token
-        entities = request_entities(access_token)
+        entities =
+          with_error_retry do
+            request_entities(access_token)
+          end
         stats = []
         entities.each_slice(10) do |chunked_entities|
           chunked_times.each do |chunked_time|
@@ -279,6 +284,35 @@ module Embulk
         when "FUNDING_INSTRUMENT"
           "FUNDING_INSTRUMENTS"
         end
+      end
+
+      def with_error_retry
+        retries = 0
+        begin
+          yield
+        rescue StandardError => e
+          if retries < NUMBER_OF_RETRIES
+            retries += 1
+
+            sleep exp_backoff_sec(response: e.response, retries: retries)
+            Rails.logger.warn("retry #{retries}, #{e.message}")
+            retry
+          else
+            Rails.logger.error("exceeds the upper limit retry, #{e.message}")
+            raise e
+          end
+        end
+      end
+
+      def exp_backoff_sec(response:, retries:)
+        rate_limit_reset_timestamp = get_rate_limit_reset_timestamp(response: response)
+
+        (rate_limit_reset_timestamp.presence || (Time.zone.now + retries.second)).to_i - Time.now.to_i
+      end
+
+      # https://developer.twitter.com/ja/docs/twitter-ads-api/rate-limiting
+      def get_rate_limit_reset_timestamp(response:)
+        response.fetch("x-account-rate-limit-reset", nil) || response.fetch("x-rate-limit-reset", nil)
       end
     end
   end
