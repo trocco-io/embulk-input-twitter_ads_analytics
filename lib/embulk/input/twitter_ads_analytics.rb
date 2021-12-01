@@ -10,6 +10,7 @@ module Embulk
       Plugin.register_input("twitter_ads_analytics", self)
 
       NUMBER_OF_RETRIES = 5
+      MAX_SLEEP_SEC_NUMBER = 1200
 
       def self.transaction(config, &control)
         # configuration code:
@@ -178,10 +179,7 @@ module Embulk
 
       def run
         access_token = get_access_token
-        entities =
-          with_error_retry do
-            request_entities(access_token)
-          end
+        entities = request_entities(access_token)
         stats = []
         entities.each_slice(10) do |chunked_entities|
           chunked_times.each do |chunked_time|
@@ -231,33 +229,59 @@ module Embulk
       end
 
       def request_entities(access_token)
-        url = "https://ads-api.twitter.com/9/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
-        url = "https://ads-api.twitter.com/9/accounts/#{@account_id}" if @entity == "ACCOUNT"
-        response = access_token.request(:get, url)
-        if response.code != "200"
-          Embulk.logger.error "#{response.body}"
-          raise
+        retries = 0
+        begin
+          url = "https://ads-api.twitter.com/9/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
+          url = "https://ads-api.twitter.com/9/accounts/#{@account_id}" if @entity == "ACCOUNT"
+          response = access_token.request(:get, url)
+          if response.code != "200"
+            Embulk.logger.error "#{response.body}"
+            raise
+          end
+          return [JSON.parse(response.body)["data"]] if @entity == "ACCOUNT"
+          JSON.parse(response.body)["data"]
+        rescue StandardError => e
+          if retries < NUMBER_OF_RETRIES
+            retries += 1
+            sleep exp_backoff_sec(response: response, retries: retries)
+            Embulk.logger.warn("retry #{retries}, #{e.message}")
+            retry
+          else
+            Embulk.logger.error("exceeds the upper limit retry, #{e.message}")
+            raise e
+          end
         end
-        return [JSON.parse(response.body)["data"]] if @entity == "ACCOUNT"
-        JSON.parse(response.body)["data"]
       end
 
       def request_stats(access_token, entity_ids, chunked_time)
-        params = {
-          entity: @entity,
-          entity_ids: entity_ids.join(","),
-          metric_groups: @metric_groups.join(","),
-          start_time: chunked_time[:start_time],
-          end_time: chunked_time[:end_time],
-          placement: @placement,
-          granularity: @granularity,
-        }
-        response = access_token.request(:get, "https://ads-api.twitter.com/9/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
-        if response.code != "200"
-          Embulk.logger.error "#{response.body}"
-          raise
+        retries = 0
+        begin
+          params = {
+            entity: @entity,
+            entity_ids: entity_ids.join(","),
+            metric_groups: @metric_groups.join(","),
+            start_time: chunked_time[:start_time],
+            end_time: chunked_time[:end_time],
+            placement: @placement,
+            granularity: @granularity,
+          }
+          response = access_token.request(:get, "https://ads-api.twitter.com/9/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
+          if response.code != "200"
+            Embulk.logger.error "#{response.body}"
+            raise
+          end
+          JSON.parse(response.body)["data"]
+        rescue StandardError => e
+          if retries < NUMBER_OF_RETRIES
+            retries += 1
+            sleep exp_backoff_sec(response: response, retries: retries)
+            Embulk.logger.warn("retry #{retries}, #{e.message}")
+            retry
+          else
+            Embulk.logger.error("exceeds the upper limit retry, #{e.message}")
+            raise e
+          end
         end
-        JSON.parse(response.body)["data"]
       end
 
       def chunked_times
@@ -286,33 +310,19 @@ module Embulk
         end
       end
 
-      def with_error_retry
-        retries = 0
-        begin
-          yield
-        rescue StandardError => e
-          if retries < NUMBER_OF_RETRIES
-            retries += 1
-
-            sleep exp_backoff_sec(response: e.response, retries: retries)
-            Rails.logger.warn("retry #{retries}, #{e.message}")
-            retry
-          else
-            Rails.logger.error("exceeds the upper limit retry, #{e.message}")
-            raise e
-          end
-        end
-      end
+      private
 
       def exp_backoff_sec(response:, retries:)
         rate_limit_reset_timestamp = get_rate_limit_reset_timestamp(response: response)
-
-        (rate_limit_reset_timestamp.presence || (Time.zone.now + retries.second)).to_i - Time.now.to_i
+        sec = (rate_limit_reset_timestamp.presence || (Time.zone.now + retries.second)).to_i - Time.zone.now.to_i
+        sec > MAX_SLEEP_SEC_NUMBER ? MAX_SLEEP_SEC_NUMBER : sec
       end
 
       # https://developer.twitter.com/ja/docs/twitter-ads-api/rate-limiting
       def get_rate_limit_reset_timestamp(response:)
-        response.fetch("x-account-rate-limit-reset", nil) || response.fetch("x-rate-limit-reset", nil)
+        # headerにkey => [value] の形式で格納されている
+        # @example x-rate-limit-reset"=>["1638316658"]
+        response.header.to_hash.fetch("x-account-rate-limit-reset", [])[0] || response.header.to_hash.fetch("x-rate-limit-reset", [])[0]
       end
     end
   end
