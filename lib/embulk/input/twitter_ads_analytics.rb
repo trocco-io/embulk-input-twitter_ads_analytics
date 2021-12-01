@@ -243,7 +243,7 @@ module Embulk
         rescue StandardError => e
           if retries < NUMBER_OF_RETRIES
             retries += 1
-            sleep_sec = exp_backoff_sec(response: response, retries: retries)
+            sleep_sec = get_sleep_sec(response: response, retries: retries)
             if sleep_sec > MAX_SLEEP_SEC_NUMBER
               raise e
             end
@@ -278,7 +278,7 @@ module Embulk
         rescue StandardError => e
           if retries < NUMBER_OF_RETRIES
             retries += 1
-            sleep_sec = exp_backoff_sec(response: response, retries: retries)
+            sleep_sec = get_sleep_sec(response: response, retries: retries)
             if sleep_sec > MAX_SLEEP_SEC_NUMBER
               raise e
             end
@@ -320,7 +320,7 @@ module Embulk
 
       private
 
-      def exp_backoff_sec(response:, retries:)
+      def get_sleep_sec(response:, retries:)
         rate_limit_reset_timestamp = get_rate_limit_reset_timestamp(response: response)
         (rate_limit_reset_timestamp.presence || (Time.zone.now + retries.second)).to_i - Time.zone.now.to_i
       end
