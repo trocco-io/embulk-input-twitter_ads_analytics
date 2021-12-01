@@ -247,7 +247,7 @@ module Embulk
             if sleep_sec > MAX_SLEEP_SEC_NUMBER
               raise e
             end
-            sleep exp_backoff_sec(response: response, retries: retries)
+            sleep sleep_sec
             Embulk.logger.warn("retry #{retries}, #{e.message}")
             retry
           else
@@ -282,6 +282,7 @@ module Embulk
             if sleep_sec > MAX_SLEEP_SEC_NUMBER
               raise e
             end
+            sleep sleep_sec
             Embulk.logger.warn("retry #{retries}, #{e.message}")
             retry
           else
