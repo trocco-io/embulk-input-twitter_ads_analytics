@@ -320,7 +320,7 @@ module Embulk
 
       # https://developer.twitter.com/ja/docs/twitter-ads-api/rate-limiting
       def get_rate_limit_reset_timestamp(response:)
-        # headerにkey => [value] の形式で格納されている
+        # It is stored in the header in the format key => [value].
         # @example x-rate-limit-reset"=>["1638316658"]
         response.header.to_hash.fetch("x-account-rate-limit-reset", [])[0] || response.header.to_hash.fetch("x-rate-limit-reset", [])[0]
       end
