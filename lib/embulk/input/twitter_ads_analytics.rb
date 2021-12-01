@@ -12,6 +12,29 @@ module Embulk
       NUMBER_OF_RETRIES = 5
       MAX_SLEEP_SEC_NUMBER = 1200
 
+      # Error codes and responses
+      # @see https://developer.twitter.com/en/docs/twitter-ads-api/response-codes
+      # Client Errors (4XX)
+      class ClientError < StandardError; end
+      class BadRequest < ClientError; end
+      class NotAuthorized < ClientError; end
+      class Forbidden < ClientError; end
+      class NotFound < ClientError; end
+      class RateLimit < ClientError; end
+      # Server Errors (5XX)
+      class ServerError < StandardError; end
+      class ServiceUnavailable < ServerError; end
+
+      ERRORS = {
+        "400" => BadRequest,
+        "401" => NotAuthorized,
+        "403" => Forbidden,
+        "404" => NotFound,
+        "429" => RateLimit,
+        "500" => ServerError,
+        "503" => ServiceUnavailable
+      }.freeze
+
       def self.transaction(config, &control)
         # configuration code:
         task = {
@@ -234,13 +257,13 @@ module Embulk
           url = "https://ads-api.twitter.com/9/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
           url = "https://ads-api.twitter.com/9/accounts/#{@account_id}" if @entity == "ACCOUNT"
           response = access_token.request(:get, url)
-          if response.code != "200"
+          if ERRORS["#{response.code}"].present?
             Embulk.logger.error "#{response.body}"
-            raise
+            raise ERRORS["#{response.code}"]
           end
           return [JSON.parse(response.body)["data"]] if @entity == "ACCOUNT"
           JSON.parse(response.body)["data"]
-        rescue StandardError => e
+        rescue ClientError, ServerError => e
           if retries < NUMBER_OF_RETRIES
             retries += 1
             sleep_sec = get_sleep_sec(response: response, retries: retries)
@@ -270,12 +293,12 @@ module Embulk
             granularity: @granularity,
           }
           response = access_token.request(:get, "https://ads-api.twitter.com/9/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
-          if response.code != "200"
+          if ERRORS["#{response.code}"].present?
             Embulk.logger.error "#{response.body}"
-            raise
+            raise ERRORS["#{response.code}"]
           end
           JSON.parse(response.body)["data"]
-        rescue StandardError => e
+        rescue ClientError, ServerError => e
           if retries < NUMBER_OF_RETRIES
             retries += 1
             sleep_sec = get_sleep_sec(response: response, retries: retries)
