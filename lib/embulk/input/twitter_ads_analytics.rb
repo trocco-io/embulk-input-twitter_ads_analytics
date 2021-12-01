@@ -243,6 +243,10 @@ module Embulk
         rescue StandardError => e
           if retries < NUMBER_OF_RETRIES
             retries += 1
+            sleep_sec = exp_backoff_sec(response: response, retries: retries)
+            if sleep_sec > MAX_SLEEP_SEC_NUMBER
+              raise e
+            end
             sleep exp_backoff_sec(response: response, retries: retries)
             Embulk.logger.warn("retry #{retries}, #{e.message}")
             retry
@@ -274,7 +278,10 @@ module Embulk
         rescue StandardError => e
           if retries < NUMBER_OF_RETRIES
             retries += 1
-            sleep exp_backoff_sec(response: response, retries: retries)
+            sleep_sec = exp_backoff_sec(response: response, retries: retries)
+            if sleep_sec > MAX_SLEEP_SEC_NUMBER
+              raise e
+            end
             Embulk.logger.warn("retry #{retries}, #{e.message}")
             retry
           else
@@ -314,8 +321,7 @@ module Embulk
 
       def exp_backoff_sec(response:, retries:)
         rate_limit_reset_timestamp = get_rate_limit_reset_timestamp(response: response)
-        sec = (rate_limit_reset_timestamp.presence || (Time.zone.now + retries.second)).to_i - Time.zone.now.to_i
-        sec > MAX_SLEEP_SEC_NUMBER ? MAX_SLEEP_SEC_NUMBER : sec
+        (rate_limit_reset_timestamp.presence || (Time.zone.now + retries.second)).to_i - Time.zone.now.to_i
       end
 
       # https://developer.twitter.com/ja/docs/twitter-ads-api/rate-limiting
