@@ -322,7 +322,11 @@ module Embulk
 
       def get_sleep_sec(response:, retries:)
         rate_limit_reset_timestamp = get_rate_limit_reset_timestamp(response: response)
-        (rate_limit_reset_timestamp.presence || (Time.zone.now + retries.second)).to_i - Time.zone.now.to_i
+        if rate_limit_reset_timestamp.present?
+          return [rate_limit_reset_timestamp.to_i - Time.now.to_i, 0].max
+        else
+          return retries.second
+        end
       end
 
       # https://developer.twitter.com/ja/docs/twitter-ads-api/rate-limiting
