@@ -86,6 +86,7 @@ module Embulk
         columns += [
           {name: "line_item_id", type: "string"},
           {name: "line_item_name", type: "string"},
+          {name: "campaign_id_in_line_item", type: "string"},
         ] if entity == "LINE_ITEM"
         columns += [
           {name: "funding_instrument_id", type: "string"},
@@ -207,9 +208,14 @@ module Embulk
         entities.each_slice(10) do |chunked_entities|
           chunked_times.each do |chunked_time|
             response = request_stats(access_token, chunked_entities.map { |entity| entity["id"] }, chunked_time)
+            line_item_campaign_id = {}
+            if @entity == "LINE_ITEM"
+              line_item_campaign_id = chunked_entities.map {|entity| [entity["id"], entity["campaign_id"]]}.to_h
+            end
             response.each do |row|
               row["start_date"] = chunked_time[:start_date]
               row["end_date"] = chunked_time[:end_date]
+              row["campaign_id_in_line_item"] = line_item_campaign_id[row["id"]] if @entity == "LINE_ITEM"
             end
             stats += response
           end
@@ -221,6 +227,8 @@ module Embulk
             @columns.each do |column|
               if ["account_id", "campaign_id", "line_item_id", "funding_instrument_id"].include?(column["name"])
                 page << item["id"]
+              elsif column["name"] == "campaign_id_in_line_item"
+                page << item["campaign_id_in_line_item"]
               elsif column["name"] == "date"
                 page << Time.zone.parse(date.to_s)
               elsif ["account_name", "campaign_name", "line_item_name"].include?(column["name"])
