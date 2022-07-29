@@ -86,7 +86,7 @@ module Embulk
         columns += [
           {name: "line_item_id", type: "string"},
           {name: "line_item_name", type: "string"},
-          {name: "campaign_id_in_line_item", type: "string"},
+          {name: "campaign_id", type: "string"},
         ] if entity == "LINE_ITEM"
         columns += [
           {name: "funding_instrument_id", type: "string"},
@@ -215,7 +215,7 @@ module Embulk
             response.each do |row|
               row["start_date"] = chunked_time[:start_date]
               row["end_date"] = chunked_time[:end_date]
-              row["campaign_id_in_line_item"] = line_item_campaign_id[row["id"]] if @entity == "LINE_ITEM"
+              row["campaign_id"] = line_item_campaign_id[row["id"]] if @entity == "LINE_ITEM"
             end
             stats += response
           end
@@ -225,10 +225,10 @@ module Embulk
           (Date.parse(item["start_date"])..Date.parse(item["end_date"])).each_with_index do |date, i|
             page = []
             @columns.each do |column|
-              if ["account_id", "campaign_id", "line_item_id", "funding_instrument_id"].include?(column["name"])
+              if @entity == "LINE_ITEM" && column["name"] == "campaign_id"
+                page << item["campaign_id"]
+              elsif ["account_id", "campaign_id", "line_item_id", "funding_instrument_id"].include?(column["name"])
                 page << item["id"]
-              elsif column["name"] == "campaign_id_in_line_item"
-                page << item["campaign_id_in_line_item"]
               elsif column["name"] == "date"
                 page << Time.zone.parse(date.to_s)
               elsif ["account_name", "campaign_name", "line_item_name"].include?(column["name"])
