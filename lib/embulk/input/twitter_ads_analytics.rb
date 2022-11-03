@@ -262,8 +262,8 @@ module Embulk
       def request_entities(access_token)
         retries = 0
         begin
-          url = "https://ads-api.twitter.com/11/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
-          url = "https://ads-api.twitter.com/11/accounts/#{@account_id}" if @entity == "ACCOUNT"
+          url = "https://ads-api.twitter.com/12/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
+          url = "https://ads-api.twitter.com/12/accounts/#{@account_id}" if @entity == "ACCOUNT"
           response = access_token.request(:get, url)
           if ERRORS["#{response.code}"].present?
             Embulk.logger.error "#{response.body}"
@@ -300,7 +300,7 @@ module Embulk
             placement: @placement,
             granularity: @granularity,
           }
-          response = access_token.request(:get, "https://ads-api.twitter.com/11/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
+          response = access_token.request(:get, "https://ads-api.twitter.com/12/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
           if ERRORS["#{response.code}"].present?
             Embulk.logger.error "#{response.body}"
             raise ERRORS["#{response.code}"]
