@@ -12,6 +12,8 @@ module Embulk
       NUMBER_OF_RETRIES = 5
       MAX_SLEEP_SEC_NUMBER = 1200
 
+      ADS_API_VERSION = 12
+
       # Error codes and responses
       # @see https://developer.twitter.com/en/docs/twitter-ads-api/response-codes
       # Client Errors (4XX)
@@ -262,8 +264,8 @@ module Embulk
       def request_entities(access_token)
         retries = 0
         begin
-          url = "https://ads-api.twitter.com/12/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
-          url = "https://ads-api.twitter.com/12/accounts/#{@account_id}" if @entity == "ACCOUNT"
+          url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
+          url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}" if @entity == "ACCOUNT"
           response = access_token.request(:get, url)
           if ERRORS["#{response.code}"].present?
             Embulk.logger.error "#{response.body}"
@@ -300,7 +302,7 @@ module Embulk
             placement: @placement,
             granularity: @granularity,
           }
-          response = access_token.request(:get, "https://ads-api.twitter.com/12/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
+          response = access_token.request(:get, "https://ads-api.twitter.com/#{ADS_API_VERSION}/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
           if ERRORS["#{response.code}"].present?
             Embulk.logger.error "#{response.body}"
             raise ERRORS["#{response.code}"]
