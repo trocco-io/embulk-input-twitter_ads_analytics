@@ -264,8 +264,9 @@ module Embulk
       def request_entities(access_token)
         retries = 0
         begin
-          url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}/#{entity_plural(@entity).downcase}"
-          url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}" if @entity == "ACCOUNT"
+          query = {count: 1000}.to_query
+          url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}/#{entity_plural(@entity).downcase}?#{query}"
+          url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}?#{query}" if @entity == "ACCOUNT"
           response = access_token.request(:get, url)
           if ERRORS["#{response.code}"].present?
             Embulk.logger.error "#{response.body}"
