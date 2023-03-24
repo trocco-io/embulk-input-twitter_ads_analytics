@@ -91,6 +91,14 @@ module Embulk
           {name: "campaign_id", type: "string"},
         ] if entity == "LINE_ITEM"
         columns += [
+          {name: "promoted_tweet_id", type: "string"},
+          {name: "line_item_id", type: "string"},
+        ] if entity == "PROMOTED_TWEET"
+        columns += [
+          {name: "media_creative_id", type: "string"},
+          {name: "line_item_id", type: "string"},
+        ] if entity == "MEDIA_CREATIVE"
+        columns += [
           {name: "funding_instrument_id", type: "string"},
           {name: "description", type: "string"},
         ] if entity == "FUNDING_INSTRUMENT"
@@ -214,10 +222,15 @@ module Embulk
             if @entity == "LINE_ITEM"
               line_item_campaign_id = chunked_entities.map {|entity| [entity["id"], entity["campaign_id"]]}.to_h
             end
+            entity_line_item_id = {}
+            if has_line_item_id?(@entity)
+              entity_line_item_id = chunked_entities.map {|entity| [entity["id"], entity["line_item_id"]]}.to_h
+            end
             response.each do |row|
               row["start_date"] = chunked_time[:start_date]
               row["end_date"] = chunked_time[:end_date]
               row["campaign_id"] = line_item_campaign_id[row["id"]] if @entity == "LINE_ITEM"
+              row["line_item_id"] = entity_line_item_id[row["id"]] if has_line_item_id?(@entity)
             end
             stats += response
           end
@@ -229,7 +242,16 @@ module Embulk
             @columns.each do |column|
               if @entity == "LINE_ITEM" && column["name"] == "campaign_id"
                 page << item["campaign_id"]
-              elsif ["account_id", "campaign_id", "line_item_id", "funding_instrument_id"].include?(column["name"])
+              elsif has_line_item_id?(@entity) && column["name"] == "line_item_id"
+                page << item["line_item_id"]
+              elsif [
+                "account_id",
+                "campaign_id",
+                "line_item_id",
+                "promoted_tweet_id",
+                "media_creative_id",
+                "funding_instrument_id",
+              ].include?(column["name"])
                 page << item["id"]
               elsif column["name"] == "date"
                 page << Time.zone.parse(date.to_s)
@@ -281,6 +303,7 @@ module Embulk
             if sleep_sec > MAX_SLEEP_SEC_NUMBER
               raise e
             end
+            Embulk.logger.info "waiting for retry #{sleep_sec} seconds"
             sleep sleep_sec
             Embulk.logger.warn("retry #{retries}, #{e.message}")
             retry
@@ -316,6 +339,7 @@ module Embulk
             if sleep_sec > MAX_SLEEP_SEC_NUMBER
               raise e
             end
+            Embulk.logger.info "waiting for retry #{sleep_sec} seconds"
             sleep sleep_sec
             Embulk.logger.warn("retry #{retries}, #{e.message}")
             retry
@@ -345,6 +369,8 @@ module Embulk
           "LINE_ITEMS"
         when "PROMOTED_TWEET"
           "PROMOTED_TWEETS"
+        when "MEDIA_CREATIVE"
+          "MEDIA_CREATIVES"
         when "ACCOUNT"
           "ACCOUNTS"
         when "FUNDING_INSTRUMENT"
@@ -353,6 +379,10 @@ module Embulk
       end
 
       private
+
+      def has_line_item_id?(entity)
+        entity == "PROMOTED_TWEET" || entity == "MEDIA_CREATIVE"
+      end
 
       def get_sleep_sec(response:, retries:)
         rate_limit_reset_timestamp = get_rate_limit_reset_timestamp(response: response)
