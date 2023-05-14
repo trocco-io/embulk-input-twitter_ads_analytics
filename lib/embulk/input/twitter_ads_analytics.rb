@@ -54,6 +54,7 @@ module Embulk
           "timezone" => config.param("timezone", :string),
           "async" => config.param("timezone", :bool),
           "columns" => config.param("columns", :array),
+          "request_entities_limit" => config.param("request_entities_limit", :integer, default: 1000),
         }
 
         columns = []
@@ -207,6 +208,7 @@ module Embulk
         @timezone = task["timezone"]
         @async = task["async"]
         @columns = task["columns"]
+        @request_entities_limit = task["request_entities_limit"]
 
         Time.zone = @timezone
       end
@@ -286,7 +288,7 @@ module Embulk
       def request_entities(access_token)
         retries = 0
         begin
-          query = {count: 1000}.to_query
+          query = {count: @request_entities_limit}.to_query
           url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}/#{entity_plural(@entity).downcase}?#{query}"
           url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}?#{query}" if @entity == "ACCOUNT"
           response = access_token.request(:get, url)
