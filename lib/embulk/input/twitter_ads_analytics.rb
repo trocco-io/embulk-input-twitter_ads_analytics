@@ -285,35 +285,52 @@ module Embulk
         OAuth::AccessToken.from_hash(consumer, oauth_token: @oauth_token, oauth_token_secret: @oauth_token_secret)
       end
 
-      def request_entities(access_token)
+      def request_entities_one_page(access_token, cursor)
         retries = 0
-        begin
-          query = {count: @request_entities_limit}.to_query
-          url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}/#{entity_plural(@entity).downcase}?#{query}"
-          url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}?#{query}" if @entity == "ACCOUNT"
-          response = access_token.request(:get, url)
-          if ERRORS["#{response.code}"].present?
-            Embulk.logger.error "#{response.body}"
-            raise ERRORS["#{response.code}"]
-          end
-          return [JSON.parse(response.body)["data"]] if @entity == "ACCOUNT"
-          JSON.parse(response.body)["data"]
-        rescue ClientError, ServerError => e
-          if retries < NUMBER_OF_RETRIES
-            retries += 1
-            sleep_sec = get_sleep_sec(response: response, retries: retries)
-            if sleep_sec > MAX_SLEEP_SEC_NUMBER
-              raise e
-            end
-            Embulk.logger.info "waiting for retry #{sleep_sec} seconds"
-            sleep sleep_sec
-            Embulk.logger.warn("retry #{retries}, #{e.message}")
-            retry
-          else
-            Embulk.logger.error("exceeds the upper limit retry, #{e.message}")
+        arg = {count: @request_entities_limit}
+        arg[:cursor] = cursor if cursor
+        query = arg.to_query
+        url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}/#{entity_plural(@entity).downcase}?#{query}"
+        url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}?#{query}" if @entity == "ACCOUNT"
+        response = access_token.request(:get, url)
+        if ERRORS["#{response.code}"].present?
+          Embulk.logger.error "#{response.body}"
+          raise ERRORS["#{response.code}"]
+        end
+        response_json = JSON.parse(response.body)
+        response_data = response_json["data"]
+
+        {
+          data: @entity == "ACCOUNT" ? [response_data] : response_data,
+          next_cursor: response_json["next_cursor"]
+        }
+      rescue ClientError, ServerError => e
+        if retries < NUMBER_OF_RETRIES
+          retries += 1
+          sleep_sec = get_sleep_sec(response: response, retries: retries)
+          if sleep_sec > MAX_SLEEP_SEC_NUMBER
             raise e
           end
+          Embulk.logger.info "waiting for retry #{sleep_sec} seconds"
+          sleep sleep_sec
+          Embulk.logger.warn("retry #{retries}, #{e.message}")
+          retry
+        else
+          Embulk.logger.error("exceeds the upper limit retry, #{e.message}")
+          raise e
         end
+      end
+
+      def request_entities(access_token)
+        cursor = nil
+        data = []
+        loop do
+          response = request_entities_one_page(access_token, cursor)
+          data += response[:data]
+          cursor = response[:next_cursor]
+          break unless cursor
+        end
+        data
       end
 
       def request_stats(access_token, entity_ids, chunked_time)
