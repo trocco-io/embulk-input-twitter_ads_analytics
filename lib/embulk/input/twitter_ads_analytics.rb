@@ -54,6 +54,7 @@ module Embulk
           "timezone" => config.param("timezone", :string),
           "async" => config.param("timezone", :bool),
           "columns" => config.param("columns", :array),
+          "request_entities_limit" => config.param("request_entities_limit", :integer, default: 1000),
         }
 
         columns = []
@@ -207,6 +208,7 @@ module Embulk
         @timezone = task["timezone"]
         @async = task["async"]
         @columns = task["columns"]
+        @request_entities_limit = task["request_entities_limit"]
 
         Time.zone = @timezone
       end
@@ -283,10 +285,12 @@ module Embulk
         OAuth::AccessToken.from_hash(consumer, oauth_token: @oauth_token, oauth_token_secret: @oauth_token_secret)
       end
 
-      def request_entities(access_token)
+      def request_entities_one_page(access_token, cursor)
         retries = 0
         begin
-          query = {count: 1000}.to_query
+          arg = {count: @request_entities_limit}
+          arg[:cursor] = cursor if cursor
+          query = arg.to_query
           url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}/#{entity_plural(@entity).downcase}?#{query}"
           url = "https://ads-api.twitter.com/#{ADS_API_VERSION}/accounts/#{@account_id}?#{query}" if @entity == "ACCOUNT"
           response = access_token.request(:get, url)
@@ -294,8 +298,13 @@ module Embulk
             Embulk.logger.error "#{response.body}"
             raise ERRORS["#{response.code}"]
           end
-          return [JSON.parse(response.body)["data"]] if @entity == "ACCOUNT"
-          JSON.parse(response.body)["data"]
+          response_json = JSON.parse(response.body)
+          response_data = response_json["data"]
+
+          {
+            data: @entity == "ACCOUNT" ? [response_data] : response_data,
+            next_cursor: response_json["next_cursor"]
+          }
         rescue ClientError, ServerError => e
           if retries < NUMBER_OF_RETRIES
             retries += 1
@@ -312,6 +321,18 @@ module Embulk
             raise e
           end
         end
+      end
+
+      def request_entities(access_token)
+        cursor = nil
+        data = []
+        loop do
+          response = request_entities_one_page(access_token, cursor)
+          data += response[:data]
+          cursor = response[:next_cursor]
+          break unless cursor
+        end
+        data
       end
 
       def request_stats(access_token, entity_ids, chunked_time)
