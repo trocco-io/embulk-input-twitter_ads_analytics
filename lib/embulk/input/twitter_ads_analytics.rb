@@ -305,7 +305,7 @@ module Embulk
             data: @entity == "ACCOUNT" ? [response_data] : response_data,
             next_cursor: response_json["next_cursor"]
           }
-        rescue ClientError, ServerError => e
+        rescue RateLimit, ServerError => e
           if retries < NUMBER_OF_RETRIES
             retries += 1
             sleep_sec = get_sleep_sec(response: response, retries: retries)
@@ -353,7 +353,7 @@ module Embulk
             raise ERRORS["#{response.code}"]
           end
           JSON.parse(response.body)["data"]
-        rescue ClientError, ServerError => e
+        rescue RateLimit, ServerError => e
           if retries < NUMBER_OF_RETRIES
             retries += 1
             sleep_sec = get_sleep_sec(response: response, retries: retries)
