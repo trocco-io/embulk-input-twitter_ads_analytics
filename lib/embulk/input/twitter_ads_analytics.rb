@@ -52,6 +52,9 @@ module Embulk
           "start_date" => config.param("start_date", :string),
           "end_date" => config.param("end_date", :string),
           "timezone" => config.param("timezone", :string),
+          "entity_start_date" => config.param("entity_start_date", :string, default: nil),
+          "entity_end_date" => config.param("entity_end_date", :string, default: nil),
+          "entity_timezone" => config.param("entity_timezone", :string, default: nil),
           "async" => config.param("timezone", :bool),
           "columns" => config.param("columns", :array),
           "request_entities_limit" => config.param("request_entities_limit", :integer, default: 1000),
@@ -206,6 +209,9 @@ module Embulk
         @start_date = task["start_date"]
         @end_date = task["end_date"]
         @timezone = task["timezone"]
+        @entity_start_date = task["entity_start_date"]
+        @entity_end_date = task["entity_end_date"]
+        @entity_timezone = task["entity_timezone"]
         @async = task["async"]
         @columns = task["columns"]
         @request_entities_limit = task["request_entities_limit"]
@@ -215,7 +221,7 @@ module Embulk
 
       def run
         access_token = get_access_token
-        entities = request_entities(access_token)
+        entities = filtered_request_entities(access_token)
         stats = []
         entities.each_slice(10) do |chunked_entities|
           chunked_times.each do |chunked_time|
@@ -333,6 +339,23 @@ module Embulk
           break unless cursor
         end
         data
+      end
+
+      def filtered_request_entities(access_token)
+        entities = request_entities(access_token)
+        return entities unless @entity_timezone
+
+        tz = ActiveSupport::TimeZone[@entity_timezone]
+        if @entity_start_date
+          start_date = tz.parse(@entity_start_date)
+          entities = entities.select { |entity| start_date <= Time.parse(entity["created_at"]) }
+        end
+
+        if @entity_end_date
+          end_date = tz.parse(@entity_end_date)
+          entities = entities.select { |entity| end_date >= Time.parse(entity["created_at"]) }
+        end
+        entities
       end
 
       def request_stats(access_token, entity_ids, chunked_time)
