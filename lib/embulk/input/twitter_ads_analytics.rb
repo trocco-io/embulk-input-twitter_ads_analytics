@@ -4,6 +4,8 @@ require "active_support/core_ext/date"
 require "active_support/core_ext/time"
 require "active_support/core_ext/numeric"
 
+require_relative 'util'
+
 module Embulk
   module Input
     class TwitterAdsAnalytics < InputPlugin
@@ -221,7 +223,7 @@ module Embulk
 
       def run
         access_token = get_access_token
-        entities = filtered_request_entities(access_token)
+        entities = Util.filter_entities_by_time_string(request_entities(access_token), @entity_start_date, @entity_end_date, @entity_timezone)
         stats = []
         entities.each_slice(10) do |chunked_entities|
           chunked_times.each do |chunked_time|
@@ -339,23 +341,6 @@ module Embulk
           break unless cursor
         end
         data
-      end
-
-      def filtered_request_entities(access_token)
-        entities = request_entities(access_token)
-        return entities unless @entity_timezone
-
-        tz = ActiveSupport::TimeZone[@entity_timezone]
-        if @entity_start_date
-          start_date = tz.parse(@entity_start_date)
-          entities = entities.select { |entity| start_date <= Time.parse(entity["created_at"]) }
-        end
-
-        if @entity_end_date
-          end_date = tz.parse(@entity_end_date)
-          entities = entities.select { |entity| end_date >= Time.parse(entity["created_at"]) }
-        end
-        entities
       end
 
       def request_stats(access_token, entity_ids, chunked_time)
