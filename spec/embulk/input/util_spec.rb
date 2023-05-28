@@ -11,32 +11,46 @@ RSpec.describe Util do
     let(:entity_0102) { {'created_at' => '2020-01-02T00:00Z'} }
     let(:entity_0103) { {'created_at' => '2020-01-03T00:00Z'} }
 
-    context 'start_day and end_day != nil' do
+    context 'start_date and end_date != nil' do
       let(:start_date) { '2020-01-02' }
       let(:end_date) { '2020-01-02' }
 
       it { is_expected.to eq([entity_0102]) }
     end
 
-    context 'only start_day != nil' do
+    context 'only start_date != nil' do
       let(:start_date) { '2020-01-02' }
       let(:end_date) { nil }
 
       it { is_expected.to eq([entity_0102, entity_0103]) }
     end
 
-    context 'only end_day != nil' do
+    context 'only end_date != nil' do
       let(:start_date) { nil }
       let(:end_date) { '2020-01-02' }
 
       it { is_expected.to eq([entity_0101, entity_0102]) }
     end
 
-    context 'start_day and end_day = nil' do
+    context 'start_date and end_date = nil' do
       let(:start_date) { nil }
       let(:end_date) { nil }
 
       it { is_expected.to eq([entity_0101, entity_0102, entity_0103]) }
+    end
+
+    context 'start_date invalid' do
+      let(:start_date) { 'invalid' }
+      let(:end_date) { nil }
+
+      it { expect { subject }.to raise_error(ArgumentError) }
+    end
+
+    context 'end_date invalid' do
+      let(:start_date) { nil }
+      let(:end_date) { 'invalid' }
+
+      it { expect { subject }.to raise_error(ArgumentError) }
     end
   end
 
@@ -64,6 +78,12 @@ RSpec.describe Util do
       let(:timezone) { nil }
 
       it { is_expected.to eq([entity_utc, entity_tokyo]) }
+    end
+
+    context 'timezone invalid' do
+      let(:timezone) { 'invalid' }
+
+      it { expect { subject }.to raise_error(ArgumentError) }
     end
   end
 end
