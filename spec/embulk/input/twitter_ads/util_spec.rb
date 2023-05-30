@@ -1,7 +1,7 @@
-require 'embulk/input/util'
+require 'embulk/input/twitter_ads/util'
 
-RSpec.describe Util do
-  subject { Util.filter_entities_by_time_string(entities, start_date, end_date, timezone) }
+RSpec.describe Embulk::Input::TwitterAds::Util do
+  subject { Embulk::Input::TwitterAds::Util.filter_entities_by_time_string(entities, start_date, end_date, timezone) }
 
   describe 'date' do
     let(:timezone) { 'UTC' }

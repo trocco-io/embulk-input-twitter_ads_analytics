@@ -4,12 +4,14 @@ require "active_support/core_ext/date"
 require "active_support/core_ext/time"
 require "active_support/core_ext/numeric"
 
-require_relative 'util'
+require_relative 'twitter_ads/util'
 
 module Embulk
   module Input
     class TwitterAdsAnalytics < InputPlugin
       Plugin.register_input("twitter_ads_analytics", self)
+
+      include Embulk::Input::TwitterAds
 
       NUMBER_OF_RETRIES = 5
       MAX_SLEEP_SEC_NUMBER = 1200
