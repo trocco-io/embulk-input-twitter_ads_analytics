@@ -4,10 +4,14 @@ require "active_support/core_ext/date"
 require "active_support/core_ext/time"
 require "active_support/core_ext/numeric"
 
+require_relative 'twitter_ads/util'
+
 module Embulk
   module Input
     class TwitterAdsAnalytics < InputPlugin
       Plugin.register_input("twitter_ads_analytics", self)
+
+      include Embulk::Input::TwitterAds
 
       NUMBER_OF_RETRIES = 5
       MAX_SLEEP_SEC_NUMBER = 1200
@@ -52,6 +56,9 @@ module Embulk
           "start_date" => config.param("start_date", :string),
           "end_date" => config.param("end_date", :string),
           "timezone" => config.param("timezone", :string),
+          "entity_start_date" => config.param("entity_start_date", :string, default: nil),
+          "entity_end_date" => config.param("entity_end_date", :string, default: nil),
+          "entity_timezone" => config.param("entity_timezone", :string, default: nil),
           "async" => config.param("timezone", :bool),
           "columns" => config.param("columns", :array),
           "request_entities_limit" => config.param("request_entities_limit", :integer, default: 1000),
@@ -206,6 +213,9 @@ module Embulk
         @start_date = task["start_date"]
         @end_date = task["end_date"]
         @timezone = task["timezone"]
+        @entity_start_date = task["entity_start_date"]
+        @entity_end_date = task["entity_end_date"]
+        @entity_timezone = task["entity_timezone"]
         @async = task["async"]
         @columns = task["columns"]
         @request_entities_limit = task["request_entities_limit"]
@@ -215,7 +225,7 @@ module Embulk
 
       def run
         access_token = get_access_token
-        entities = request_entities(access_token)
+        entities = Util.filter_entities_by_time_string(request_entities(access_token), @entity_start_date, @entity_end_date, @entity_timezone)
         stats = []
         entities.each_slice(10) do |chunked_entities|
           chunked_times.each do |chunked_time|
