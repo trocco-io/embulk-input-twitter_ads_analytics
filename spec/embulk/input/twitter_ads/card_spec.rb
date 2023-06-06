@@ -5,7 +5,7 @@ require "oauth"
 RSpec.describe Embulk::Input::TwitterAds::Card do
   let(:access_token) do
     consumer = OAuth::Consumer.new('consumer_key', 'consumer_secret', site: "https://ads-api.twitter.com", scheme: :header)
-    access_token = OAuth::AccessToken.from_hash(consumer, oauth_token: 'oauth_token', oauth_token_secret: 'oauth_token_secret')
+    OAuth::AccessToken.from_hash(consumer, oauth_token: 'oauth_token', oauth_token_secret: 'oauth_token_secret')
   end
   let(:logger) { double(Object) }
 
