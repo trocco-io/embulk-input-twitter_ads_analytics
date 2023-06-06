@@ -44,23 +44,25 @@ module Embulk
 
       def self.transaction(config, &control)
         # configuration code:
+        entity = config.param("entity", :string).upcase
+        optional_if_card = entity == "CARD" ? { default: nil } : {}
         task = {
           "consumer_key" => config.param("consumer_key", :string),
           "consumer_secret" => config.param("consumer_secret", :string),
           "oauth_token" => config.param("oauth_token", :string),
           "oauth_token_secret" => config.param("oauth_token_secret", :string),
           "account_id" => config.param("account_id", :string),
-          "entity" => config.param("entity", :string).upcase,
-          "metric_groups" => config.param("metric_groups", :array).map(&:upcase),
-          "granularity" => config.param("granularity", :string).upcase,
-          "placement" => config.param("placement", :string).upcase,
-          "start_date" => config.param("start_date", :string),
-          "end_date" => config.param("end_date", :string),
-          "timezone" => config.param("timezone", :string),
+          "entity" => entity,
+          "metric_groups" => config.param("metric_groups", :array, **optional_if_card)&.map(&:upcase),
+          "granularity" => config.param("granularity", :string, **optional_if_card)&.upcase,
+          "placement" => config.param("placement", :string, **optional_if_card)&.upcase,
+          "start_date" => config.param("start_date", :string, **optional_if_card),
+          "end_date" => config.param("end_date", :string, **optional_if_card),
+          "timezone" => config.param("timezone", :string, **optional_if_card),
           "entity_start_date" => config.param("entity_start_date", :string, default: nil),
           "entity_end_date" => config.param("entity_end_date", :string, default: nil),
           "entity_timezone" => config.param("entity_timezone", :string, default: nil),
-          "async" => config.param("timezone", :bool),
+          "async" => config.param("timezone", :bool, **optional_if_card),
           "columns" => config.param("columns", :array),
           "request_entities_limit" => config.param("request_entities_limit", :integer, default: 1000),
         }
