@@ -5,6 +5,7 @@ require "active_support/core_ext/time"
 require "active_support/core_ext/numeric"
 
 require_relative 'twitter_ads/util'
+require_relative 'twitter_ads/card'
 
 module Embulk
   module Input
@@ -81,6 +82,9 @@ module Embulk
 
       def self.guess(config)
         entity = config.param("entity", :string).upcase
+
+        return { "columns" => Card.columns } if entity == "CARD"
+
         metric_groups = config.param("metric_groups", :array).map(&:upcase)
         columns = [
           {name: "date", type: "timestamp", format: "%Y-%m-%d"},
@@ -225,6 +229,22 @@ module Embulk
 
       def run
         access_token = get_access_token
+
+        if @entity.upcase == "CARD"
+          pages = Card.fetch_pages(api_version: ADS_API_VERSION,
+                                   access_token: access_token,
+                                   account_id: @account_id,
+                                   logger: Embulk.logger,
+                                   entity_start_date: @entity_start_date,
+                                   entity_end_date: @entity_end_date,
+                                   entity_timezone: @entity_timezone,
+                                   columns: @columns)
+          pages.each { |page| page_builder.add(page) }
+          page_builder.finish
+
+          return {}
+        end
+
         entities = Util.filter_entities_by_time_string(request_entities(access_token), @entity_start_date, @entity_end_date, @entity_timezone)
         stats = []
         entities.each_slice(10) do |chunked_entities|
