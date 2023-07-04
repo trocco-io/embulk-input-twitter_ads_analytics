@@ -62,7 +62,7 @@ module Embulk
           "entity_start_date" => config.param("entity_start_date", :string, default: nil),
           "entity_end_date" => config.param("entity_end_date", :string, default: nil),
           "entity_timezone" => config.param("entity_timezone", :string, default: nil),
-          "async" => config.param("timezone", :bool, **optional_if_card),
+          "async" => config.param("async", :bool, **optional_if_card),
           "columns" => config.param("columns", :array),
           "request_entities_limit" => config.param("request_entities_limit", :integer, default: 1000),
         }
