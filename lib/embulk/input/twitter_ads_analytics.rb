@@ -4,10 +4,15 @@ require "active_support/core_ext/date"
 require "active_support/core_ext/time"
 require "active_support/core_ext/numeric"
 
+require_relative 'twitter_ads/util'
+require_relative 'twitter_ads/card'
+
 module Embulk
   module Input
     class TwitterAdsAnalytics < InputPlugin
       Plugin.register_input("twitter_ads_analytics", self)
+
+      include Embulk::Input::TwitterAds
 
       NUMBER_OF_RETRIES = 5
       MAX_SLEEP_SEC_NUMBER = 1200
@@ -39,20 +44,25 @@ module Embulk
 
       def self.transaction(config, &control)
         # configuration code:
+        entity = config.param("entity", :string).upcase
+        optional_if_card = entity == "CARD" ? { default: nil } : {}
         task = {
           "consumer_key" => config.param("consumer_key", :string),
           "consumer_secret" => config.param("consumer_secret", :string),
           "oauth_token" => config.param("oauth_token", :string),
           "oauth_token_secret" => config.param("oauth_token_secret", :string),
           "account_id" => config.param("account_id", :string),
-          "entity" => config.param("entity", :string).upcase,
-          "metric_groups" => config.param("metric_groups", :array).map(&:upcase),
-          "granularity" => config.param("granularity", :string).upcase,
-          "placement" => config.param("placement", :string).upcase,
-          "start_date" => config.param("start_date", :string),
-          "end_date" => config.param("end_date", :string),
-          "timezone" => config.param("timezone", :string),
-          "async" => config.param("timezone", :bool),
+          "entity" => entity,
+          "metric_groups" => config.param("metric_groups", :array, **optional_if_card)&.map(&:upcase),
+          "granularity" => config.param("granularity", :string, **optional_if_card)&.upcase,
+          "placement" => config.param("placement", :string, **optional_if_card)&.upcase,
+          "start_date" => config.param("start_date", :string, **optional_if_card),
+          "end_date" => config.param("end_date", :string, **optional_if_card),
+          "timezone" => config.param("timezone", :string, **optional_if_card),
+          "entity_start_date" => config.param("entity_start_date", :string, default: nil),
+          "entity_end_date" => config.param("entity_end_date", :string, default: nil),
+          "entity_timezone" => config.param("entity_timezone", :string, default: nil),
+          "async" => config.param("async", :bool, **optional_if_card),
           "columns" => config.param("columns", :array),
           "request_entities_limit" => config.param("request_entities_limit", :integer, default: 1000),
         }
@@ -74,6 +84,9 @@ module Embulk
 
       def self.guess(config)
         entity = config.param("entity", :string).upcase
+
+        return { "columns" => Card.columns } if entity == "CARD"
+
         metric_groups = config.param("metric_groups", :array).map(&:upcase)
         columns = [
           {name: "date", type: "timestamp", format: "%Y-%m-%d"},
@@ -206,6 +219,9 @@ module Embulk
         @start_date = task["start_date"]
         @end_date = task["end_date"]
         @timezone = task["timezone"]
+        @entity_start_date = task["entity_start_date"]
+        @entity_end_date = task["entity_end_date"]
+        @entity_timezone = task["entity_timezone"]
         @async = task["async"]
         @columns = task["columns"]
         @request_entities_limit = task["request_entities_limit"]
@@ -215,7 +231,23 @@ module Embulk
 
       def run
         access_token = get_access_token
-        entities = request_entities(access_token)
+
+        if @entity.upcase == "CARD"
+          pages = Card.fetch_pages(api_version: ADS_API_VERSION,
+                                   access_token: access_token,
+                                   account_id: @account_id,
+                                   logger: Embulk.logger,
+                                   entity_start_date: @entity_start_date,
+                                   entity_end_date: @entity_end_date,
+                                   entity_timezone: @entity_timezone,
+                                   columns: @columns)
+          pages.each { |page| page_builder.add(page) }
+          page_builder.finish
+
+          return {}
+        end
+
+        entities = Util.filter_entities_by_time_string(request_entities(access_token), @entity_start_date, @entity_end_date, @entity_timezone)
         stats = []
         entities.each_slice(10) do |chunked_entities|
           chunked_times.each do |chunked_time|
