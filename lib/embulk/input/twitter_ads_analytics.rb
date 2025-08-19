@@ -249,7 +249,7 @@ module Embulk
 
         entities = Util.filter_entities_by_time_string(request_entities(access_token), @entity_start_date, @entity_end_date, @entity_timezone)
         stats = []
-        entities.each_slice(10) do |chunked_entities|
+        entities.each_slice(5) do |chunked_entities|
           chunked_times.each do |chunked_time|
             response = request_stats(access_token, chunked_entities.map { |entity| entity["id"] }, chunked_time)
             line_item_campaign_id = {}
