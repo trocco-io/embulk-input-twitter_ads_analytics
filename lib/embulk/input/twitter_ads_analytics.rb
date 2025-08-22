@@ -250,7 +250,7 @@ module Embulk
         
         # For async API, chunk both entities and time (90-day limit for async API)
         Embulk.logger.info "Starting async processing for #{entities.length} entities"
-        entities.each_slice(5).with_index do |chunked_entities, entity_chunk_index|
+        entities.each_slice(10).with_index do |chunked_entities, entity_chunk_index|
           Embulk.logger.info "Processing entity chunk #{entity_chunk_index + 1} with #{chunked_entities.length} entities: #{chunked_entities.map { |e| e['id'] }.join(', ')}"
           
           chunked_times_async.each_with_index do |chunked_time, time_chunk_index|
