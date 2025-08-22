@@ -62,7 +62,6 @@ module Embulk
           "entity_start_date" => config.param("entity_start_date", :string, default: nil),
           "entity_end_date" => config.param("entity_end_date", :string, default: nil),
           "entity_timezone" => config.param("entity_timezone", :string, default: nil),
-          "async" => config.param("async", :bool, **optional_if_card),
           "columns" => config.param("columns", :array),
           "request_entities_limit" => config.param("request_entities_limit", :integer, default: 1000),
         }
@@ -222,7 +221,6 @@ module Embulk
         @entity_start_date = task["entity_start_date"]
         @entity_end_date = task["entity_end_date"]
         @entity_timezone = task["entity_timezone"]
-        @async = true # task["async"]
         @columns = task["columns"]
         @request_entities_limit = task["request_entities_limit"]
 
@@ -250,59 +248,29 @@ module Embulk
         entities = Util.filter_entities_by_time_string(request_entities(access_token), @entity_start_date, @entity_end_date, @entity_timezone)
         stats = []
         
-        if @async
-          # For async API, chunk both entities and time (90-day limit for async API)
-          Embulk.logger.info "Starting async processing for #{entities.length} entities"
-          entities.each_slice(5).with_index do |chunked_entities, entity_chunk_index|
-            Embulk.logger.info "Processing entity chunk #{entity_chunk_index + 1} with #{chunked_entities.length} entities: #{chunked_entities.map { |e| e['id'] }.join(', ')}"
+        # For async API, chunk both entities and time (90-day limit for async API)
+        Embulk.logger.info "Starting async processing for #{entities.length} entities"
+        entities.each_slice(5).with_index do |chunked_entities, entity_chunk_index|
+          Embulk.logger.info "Processing entity chunk #{entity_chunk_index + 1} with #{chunked_entities.length} entities: #{chunked_entities.map { |e| e['id'] }.join(', ')}"
+          
+          chunked_times_async.each_with_index do |chunked_time, time_chunk_index|
+            Embulk.logger.info "Processing time chunk #{time_chunk_index + 1} for entity chunk #{entity_chunk_index + 1}: #{chunked_time[:start_time]} to #{chunked_time[:end_time]}"
             
-            chunked_times_async.each_with_index do |chunked_time, time_chunk_index|
-              Embulk.logger.info "Processing time chunk #{time_chunk_index + 1} for entity chunk #{entity_chunk_index + 1}: #{chunked_time[:start_time]} to #{chunked_time[:end_time]}"
-              
-              begin
-                response = request_stats(access_token, chunked_entities.map { |entity| entity["id"] }, chunked_time)
-                Embulk.logger.info "Received response for entity chunk #{entity_chunk_index + 1}, time chunk #{time_chunk_index + 1} with #{response.length} items"
-                
-                line_item_campaign_id = {}
-                if @entity == "LINE_ITEM"
-                  line_item_campaign_id = chunked_entities.map {|entity| [entity["id"], entity["campaign_id"]]}.to_h
-                  Embulk.logger.debug "Line item campaign mapping: #{line_item_campaign_id}"
-                end
-                entity_line_item_id = {}
-                if has_line_item_id?(@entity)
-                  entity_line_item_id = chunked_entities.map {|entity| [entity["id"], entity["line_item_id"]]}.to_h
-                  Embulk.logger.debug "Entity line item mapping: #{entity_line_item_id}"
-                end
-                
-                response.each do |row|
-                  row["start_date"] = chunked_time[:start_date]
-                  row["end_date"] = chunked_time[:end_date]
-                  row["campaign_id"] = line_item_campaign_id[row["id"]] if @entity == "LINE_ITEM"
-                  row["line_item_id"] = entity_line_item_id[row["id"]] if has_line_item_id?(@entity)
-                end
-                stats += response
-                Embulk.logger.info "Successfully processed entity chunk #{entity_chunk_index + 1}, time chunk #{time_chunk_index + 1}, total stats so far: #{stats.length}"
-              rescue => e
-                Embulk.logger.error "Failed to process entity chunk #{entity_chunk_index + 1}, time chunk #{time_chunk_index + 1}: #{e.class.name}: #{e.message}"
-                Embulk.logger.error "Backtrace: #{e.backtrace.first(5).join("\n")}"
-                raise e
-              end
-            end
-          end
-          Embulk.logger.info "Completed async processing, total stats collected: #{stats.length}"
-        else
-          # For sync API, keep the original nested loop structure
-          entities.each_slice(5) do |chunked_entities|
-            chunked_times.each do |chunked_time|
+            begin
               response = request_stats(access_token, chunked_entities.map { |entity| entity["id"] }, chunked_time)
+              Embulk.logger.info "Received response for entity chunk #{entity_chunk_index + 1}, time chunk #{time_chunk_index + 1} with #{response.length} items"
+              
               line_item_campaign_id = {}
               if @entity == "LINE_ITEM"
                 line_item_campaign_id = chunked_entities.map {|entity| [entity["id"], entity["campaign_id"]]}.to_h
+                Embulk.logger.debug "Line item campaign mapping: #{line_item_campaign_id}"
               end
               entity_line_item_id = {}
               if has_line_item_id?(@entity)
                 entity_line_item_id = chunked_entities.map {|entity| [entity["id"], entity["line_item_id"]]}.to_h
+                Embulk.logger.debug "Entity line item mapping: #{entity_line_item_id}"
               end
+              
               response.each do |row|
                 row["start_date"] = chunked_time[:start_date]
                 row["end_date"] = chunked_time[:end_date]
@@ -310,9 +278,15 @@ module Embulk
                 row["line_item_id"] = entity_line_item_id[row["id"]] if has_line_item_id?(@entity)
               end
               stats += response
+              Embulk.logger.info "Successfully processed entity chunk #{entity_chunk_index + 1}, time chunk #{time_chunk_index + 1}, total stats so far: #{stats.length}"
+            rescue => e
+              Embulk.logger.error "Failed to process entity chunk #{entity_chunk_index + 1}, time chunk #{time_chunk_index + 1}: #{e.class.name}: #{e.message}"
+              Embulk.logger.error "Backtrace: #{e.backtrace.first(5).join("\n")}"
+              raise e
             end
           end
         end
+        Embulk.logger.info "Completed async processing, total stats collected: #{stats.length}"
         stats.each do |item|
           metrics = item["id_data"][0]["metrics"]
           (Date.parse(item["start_date"])..Date.parse(item["end_date"])).each_with_index do |date, i|
@@ -412,48 +386,9 @@ module Embulk
       end
 
       def request_stats(access_token, entity_ids, chunked_time)
-        if @async
-          request_stats_async(access_token, entity_ids, chunked_time)
-        else
-          request_stats_sync(access_token, entity_ids, chunked_time)
-        end
+        request_stats_async(access_token, entity_ids, chunked_time)
       end
 
-      def request_stats_sync(access_token, entity_ids, chunked_time)
-        retries = 0
-        begin
-          params = {
-            entity: @entity,
-            entity_ids: entity_ids.join(","),
-            metric_groups: @metric_groups.join(","),
-            start_time: chunked_time[:start_time],
-            end_time: chunked_time[:end_time],
-            placement: @placement,
-            granularity: @granularity,
-          }
-          response = access_token.request(:get, "https://ads-api.twitter.com/#{ADS_API_VERSION}/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
-          if ERRORS["#{response.code}"].present?
-            Embulk.logger.error "#{response.body}"
-            raise ERRORS["#{response.code}"]
-          end
-          JSON.parse(response.body)["data"]
-        rescue RateLimit, ServerError => e
-          if retries < NUMBER_OF_RETRIES
-            retries += 1
-            sleep_sec = get_sleep_sec(response: response, retries: retries)
-            if sleep_sec > MAX_SLEEP_SEC_NUMBER
-              raise e
-            end
-            Embulk.logger.info "waiting for retry #{sleep_sec} seconds"
-            sleep sleep_sec
-            Embulk.logger.warn("retry #{retries}, #{e.message}")
-            retry
-          else
-            Embulk.logger.error("exceeds the upper limit retry, #{e.message}")
-            raise e
-          end
-        end
-      end
 
       def request_stats_async(access_token, entity_ids, chunked_time)
         Embulk.logger.info "Starting async stats request for entities: #{entity_ids.join(',')}"
@@ -662,16 +597,6 @@ module Embulk
         end
       end
 
-      def chunked_times
-        (Date.parse(@start_date)..Date.parse(@end_date)).each_slice(7).map do |chunked|
-          {
-            start_date: chunked.first.to_s,
-            end_date: chunked.last.to_s,
-            start_time: Time.zone.parse(chunked.first.to_s).strftime("%FT%T%z"),
-            end_time: Time.zone.parse(chunked.last.to_s).tomorrow.strftime("%FT%T%z"),
-          }
-        end
-      end
 
       def chunked_times_async
         # Async API has a maximum time window of 90 days
