@@ -62,7 +62,6 @@ module Embulk
           "entity_start_date" => config.param("entity_start_date", :string, default: nil),
           "entity_end_date" => config.param("entity_end_date", :string, default: nil),
           "entity_timezone" => config.param("entity_timezone", :string, default: nil),
-          "async" => config.param("async", :bool, **optional_if_card),
           "columns" => config.param("columns", :array),
           "request_entities_limit" => config.param("request_entities_limit", :integer, default: 1000),
         }
@@ -222,7 +221,6 @@ module Embulk
         @entity_start_date = task["entity_start_date"]
         @entity_end_date = task["entity_end_date"]
         @entity_timezone = task["entity_timezone"]
-        @async = task["async"]
         @columns = task["columns"]
         @request_entities_limit = task["request_entities_limit"]
 
@@ -249,26 +247,46 @@ module Embulk
 
         entities = Util.filter_entities_by_time_string(request_entities(access_token), @entity_start_date, @entity_end_date, @entity_timezone)
         stats = []
-        entities.each_slice(5) do |chunked_entities|
-          chunked_times.each do |chunked_time|
-            response = request_stats(access_token, chunked_entities.map { |entity| entity["id"] }, chunked_time)
-            line_item_campaign_id = {}
-            if @entity == "LINE_ITEM"
-              line_item_campaign_id = chunked_entities.map {|entity| [entity["id"], entity["campaign_id"]]}.to_h
+        
+        # For async API, chunk both entities and time (90-day limit for async API)
+        Embulk.logger.info "Starting async processing for #{entities.length} entities"
+        entities.each_slice(10).with_index do |chunked_entities, entity_chunk_index|
+          Embulk.logger.info "Processing entity chunk #{entity_chunk_index + 1} with #{chunked_entities.length} entities: #{chunked_entities.map { |e| e['id'] }.join(', ')}"
+          
+          chunked_times_async.each_with_index do |chunked_time, time_chunk_index|
+            Embulk.logger.info "Processing time chunk #{time_chunk_index + 1} for entity chunk #{entity_chunk_index + 1}: #{chunked_time[:start_time]} to #{chunked_time[:end_time]}"
+            
+            begin
+              response = request_stats(access_token, chunked_entities.map { |entity| entity["id"] }, chunked_time)
+              Embulk.logger.info "Received response for entity chunk #{entity_chunk_index + 1}, time chunk #{time_chunk_index + 1} with #{response.length} items"
+              
+              line_item_campaign_id = {}
+              if @entity == "LINE_ITEM"
+                line_item_campaign_id = chunked_entities.map {|entity| [entity["id"], entity["campaign_id"]]}.to_h
+                Embulk.logger.debug "Line item campaign mapping: #{line_item_campaign_id}"
+              end
+              entity_line_item_id = {}
+              if has_line_item_id?(@entity)
+                entity_line_item_id = chunked_entities.map {|entity| [entity["id"], entity["line_item_id"]]}.to_h
+                Embulk.logger.debug "Entity line item mapping: #{entity_line_item_id}"
+              end
+              
+              response.each do |row|
+                row["start_date"] = chunked_time[:start_date]
+                row["end_date"] = chunked_time[:end_date]
+                row["campaign_id"] = line_item_campaign_id[row["id"]] if @entity == "LINE_ITEM"
+                row["line_item_id"] = entity_line_item_id[row["id"]] if has_line_item_id?(@entity)
+              end
+              stats += response
+              Embulk.logger.info "Successfully processed entity chunk #{entity_chunk_index + 1}, time chunk #{time_chunk_index + 1}, total stats so far: #{stats.length}"
+            rescue => e
+              Embulk.logger.error "Failed to process entity chunk #{entity_chunk_index + 1}, time chunk #{time_chunk_index + 1}: #{e.class.name}: #{e.message}"
+              Embulk.logger.error "Backtrace: #{e.backtrace.first(5).join("\n")}"
+              raise e
             end
-            entity_line_item_id = {}
-            if has_line_item_id?(@entity)
-              entity_line_item_id = chunked_entities.map {|entity| [entity["id"], entity["line_item_id"]]}.to_h
-            end
-            response.each do |row|
-              row["start_date"] = chunked_time[:start_date]
-              row["end_date"] = chunked_time[:end_date]
-              row["campaign_id"] = line_item_campaign_id[row["id"]] if @entity == "LINE_ITEM"
-              row["line_item_id"] = entity_line_item_id[row["id"]] if has_line_item_id?(@entity)
-            end
-            stats += response
           end
         end
+        Embulk.logger.info "Completed async processing, total stats collected: #{stats.length}"
         stats.each do |item|
           metrics = item["id_data"][0]["metrics"]
           (Date.parse(item["start_date"])..Date.parse(item["end_date"])).each_with_index do |date, i|
@@ -368,6 +386,39 @@ module Embulk
       end
 
       def request_stats(access_token, entity_ids, chunked_time)
+        request_stats_async(access_token, entity_ids, chunked_time)
+      end
+
+
+      def request_stats_async(access_token, entity_ids, chunked_time)
+        Embulk.logger.info "Starting async stats request for entities: #{entity_ids.join(',')}"
+        Embulk.logger.info "Time range: #{chunked_time[:start_time]} to #{chunked_time[:end_time]}"
+        
+        begin
+          # Step 1: Create async job
+          Embulk.logger.info "Step 1: Creating async job..."
+          job_id = create_async_job(access_token, entity_ids, chunked_time)
+          Embulk.logger.info "Step 1 completed: Job created with ID #{job_id}"
+          
+          # Step 2: Poll for job completion
+          Embulk.logger.info "Step 2: Polling for job completion..."
+          job_result = poll_job_status(access_token, job_id)
+          Embulk.logger.info "Step 2 completed: Job finished with status SUCCESS"
+          
+          # Step 3: Download and process the result
+          Embulk.logger.info "Step 3: Downloading and processing result..."
+          result = download_and_process_job_result(access_token, job_result)
+          Embulk.logger.info "Step 3 completed: Downloaded and processed #{result.length} data items"
+          
+          return result
+        rescue => e
+          Embulk.logger.error "Async stats request failed: #{e.class.name}: #{e.message}"
+          Embulk.logger.error "Backtrace: #{e.backtrace.first(10).join("\n")}"
+          raise e
+        end
+      end
+
+      def create_async_job(access_token, entity_ids, chunked_time)
         retries = 0
         begin
           params = {
@@ -379,12 +430,32 @@ module Embulk
             placement: @placement,
             granularity: @granularity,
           }
-          response = access_token.request(:get, "https://ads-api.twitter.com/#{ADS_API_VERSION}/stats/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
+          
+          Embulk.logger.info "Creating async job for entity_ids: #{entity_ids.join(',')}"
+          response = access_token.request(:post, "https://ads-api.twitter.com/#{ADS_API_VERSION}/stats/jobs/accounts/#{@account_id}?#{URI.encode_www_form(params)}")
+          
           if ERRORS["#{response.code}"].present?
             Embulk.logger.error "#{response.body}"
             raise ERRORS["#{response.code}"]
           end
-          JSON.parse(response.body)["data"]
+          
+          response_data = JSON.parse(response.body)
+          
+          # Validate response structure
+          unless response_data && response_data["data"]
+            raise StandardError, "Invalid response structure: #{response_data}"
+          end
+          
+          job_id = response_data["data"]["id"]
+          
+          # Validate job_id
+          if job_id.nil? || job_id.empty?
+            raise StandardError, "Job ID is empty or nil in response: #{response_data}"
+          end
+          
+          Embulk.logger.info "Created async job with ID: #{job_id}"
+          
+          job_id
         rescue RateLimit, ServerError => e
           if retries < NUMBER_OF_RETRIES
             retries += 1
@@ -403,15 +474,155 @@ module Embulk
         end
       end
 
-      def chunked_times
-        (Date.parse(@start_date)..Date.parse(@end_date)).each_slice(7).map do |chunked|
-          {
-            start_date: chunked.first.to_s,
-            end_date: chunked.last.to_s,
-            start_time: Time.zone.parse(chunked.first.to_s).strftime("%FT%T%z"),
-            end_time: Time.zone.parse(chunked.last.to_s).tomorrow.strftime("%FT%T%z"),
-          }
+      def poll_job_status(access_token, job_id)
+        # Validate job_id parameter
+        if job_id.nil? || job_id.empty?
+          raise StandardError, "Job ID is nil or empty, cannot poll status"
         end
+        
+        max_polling_attempts = 60  # Maximum polling attempts (10 minutes with 10-second intervals)
+        polling_interval = 10      # Seconds between polling attempts
+        attempts = 0
+        
+        loop do
+          attempts += 1
+          Embulk.logger.info "Polling job status (attempt #{attempts}/#{max_polling_attempts}): #{job_id}"
+          
+          retries = 0
+          begin
+            # Ensure job_id is properly URL encoded
+            encoded_job_id = URI.encode_www_form_component(job_id.to_s)
+            response = access_token.request(:get, "https://ads-api.twitter.com/#{ADS_API_VERSION}/stats/jobs/accounts/#{@account_id}?job_ids=#{encoded_job_id}")
+            
+            if ERRORS["#{response.code}"].present?
+              Embulk.logger.error "#{response.body}"
+              raise ERRORS["#{response.code}"]
+            end
+            
+            response_data = JSON.parse(response.body)
+            
+            # Validate response structure
+            unless response_data && response_data["data"] && response_data["data"].is_a?(Array) && !response_data["data"].empty?
+              raise StandardError, "Invalid or empty response data: #{response_data}"
+            end
+            
+            job_data = response_data["data"].first
+            
+            # Validate job_data structure
+            unless job_data && job_data["status"]
+              raise StandardError, "Invalid job data structure: #{job_data}"
+            end
+            
+            status = job_data["status"]
+            
+            Embulk.logger.info "Job #{job_id} status: #{status}"
+            
+            case status
+            when "SUCCESS"
+              Embulk.logger.info "Job #{job_id} completed successfully"
+              return job_data
+            when "FAILED"
+              raise StandardError, "Async job #{job_id} failed"
+            when "PROCESSING", "QUEUED"
+              if attempts >= max_polling_attempts
+                raise StandardError, "Async job #{job_id} timed out after #{max_polling_attempts} attempts"
+              end
+              Embulk.logger.info "Job #{job_id} still processing, waiting #{polling_interval} seconds..."
+              sleep polling_interval
+            else
+              raise StandardError, "Unknown job status: #{status}"
+            end
+            
+          rescue RateLimit, ServerError => e
+            if retries < NUMBER_OF_RETRIES
+              retries += 1
+              sleep_sec = get_sleep_sec(response: response, retries: retries)
+              if sleep_sec > MAX_SLEEP_SEC_NUMBER
+                raise e
+              end
+              Embulk.logger.info "waiting for retry #{sleep_sec} seconds"
+              sleep sleep_sec
+              Embulk.logger.warn("retry #{retries}, #{e.message}")
+              retry
+            else
+              Embulk.logger.error("exceeds the upper limit retry, #{e.message}")
+              raise e
+            end
+          end
+        end
+      end
+
+      def download_and_process_job_result(access_token, job_data)
+        require 'net/http'
+        require 'zlib'
+        require 'stringio'
+        
+        download_url = job_data["url"]
+        Embulk.logger.info "Downloading job result from: #{download_url}"
+        
+        retries = 0
+        begin
+          uri = URI(download_url)
+          http = Net::HTTP.new(uri.host, uri.port)
+          http.use_ssl = true
+          
+          request = Net::HTTP::Get.new(uri)
+          response = http.request(request)
+          
+          if response.code != "200"
+            raise StandardError, "Failed to download job result: HTTP #{response.code}"
+          end
+          
+          # Decompress the gzipped content
+          gzipped_content = response.body
+          decompressed_content = Zlib::GzipReader.new(StringIO.new(gzipped_content)).read
+          
+          # Parse the JSON data
+          result_data = JSON.parse(decompressed_content)
+          Embulk.logger.info "Successfully downloaded and processed job result"
+          
+          result_data["data"]
+        rescue => e
+          if retries < NUMBER_OF_RETRIES
+            retries += 1
+            sleep_sec = retries.second
+            Embulk.logger.info "waiting for retry #{sleep_sec} seconds"
+            sleep sleep_sec
+            Embulk.logger.warn("retry #{retries}, #{e.message}")
+            retry
+          else
+            Embulk.logger.error("exceeds the upper limit retry, #{e.message}")
+            raise e
+          end
+        end
+      end
+
+
+      def chunked_times_async
+        # Async API has a maximum time window of 90 days
+        chunks = []
+        current_date = Date.parse(@start_date)
+        end_date = Date.parse(@end_date)
+        
+        while current_date <= end_date
+          chunk_end_date = [current_date + 89.days, end_date].min  # 90-day chunks (0-89 = 90 days)
+          
+          chunks << {
+            start_date: current_date.to_s,
+            end_date: chunk_end_date.to_s,
+            start_time: Time.zone.parse(current_date.to_s).strftime("%FT%T%z"),
+            end_time: Time.zone.parse(chunk_end_date.to_s).tomorrow.strftime("%FT%T%z"),
+          }
+          
+          current_date = chunk_end_date + 1.day
+        end
+        
+        Embulk.logger.info "Created #{chunks.length} time chunks for async API (90-day max per chunk)"
+        chunks.each_with_index do |chunk, i|
+          Embulk.logger.info "Time chunk #{i + 1}: #{chunk[:start_date]} to #{chunk[:end_date]}"
+        end
+        
+        chunks
       end
 
       def entity_plural(entity)
