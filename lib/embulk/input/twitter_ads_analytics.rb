@@ -507,8 +507,11 @@ module Embulk
             end
 
             if response_data["data"].empty?
+              # Intentionally shares max_polling_attempts with PROCESSING/QUEUED polling:
+              # empty-data and processing states are both transient, and the total wait
+              # budget across all transient states should not exceed the configured limit.
               if attempts >= max_polling_attempts
-                raise StandardError, "Async job #{job_id} timed out after #{max_polling_attempts} attempts"
+                raise StandardError, "Async job #{job_id} timed out: data remained empty after #{max_polling_attempts} attempts"
               end
               Embulk.logger.info "Job #{job_id} not yet available, waiting #{polling_interval} seconds..."
               sleep polling_interval
