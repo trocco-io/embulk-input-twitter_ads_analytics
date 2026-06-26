@@ -502,10 +502,19 @@ module Embulk
             response_data = JSON.parse(response.body)
             
             # Validate response structure
-            unless response_data && response_data["data"] && response_data["data"].is_a?(Array) && !response_data["data"].empty?
-              raise StandardError, "Invalid or empty response data: #{response_data}"
+            unless response_data && response_data["data"] && response_data["data"].is_a?(Array)
+              raise StandardError, "Invalid response data: #{response_data}"
             end
-            
+
+            if response_data["data"].empty?
+              if attempts >= max_polling_attempts
+                raise StandardError, "Async job #{job_id} timed out after #{max_polling_attempts} attempts"
+              end
+              Embulk.logger.info "Job #{job_id} not yet available, waiting #{polling_interval} seconds..."
+              sleep polling_interval
+              next
+            end
+
             job_data = response_data["data"].first
             
             # Validate job_data structure
