@@ -64,17 +64,23 @@ RSpec.describe Embulk::Input::TwitterAdsAnalytics do
       it 'keeps offering url_clicks, which is still documented' do
         expect(column_names).to include('url_clicks')
       end
+
+      it 'appends link_clicks last, so no pre-existing column changes position' do
+        expect(column_names.last).to eq('link_clicks')
+      end
     end
 
-    context 'when ENGAGEMENT is requested for an entity that does not report clicks' do
-      let(:column_names) { guessed_column_names(entity: 'ACCOUNT', metric_groups: ['ENGAGEMENT']) }
+    %w[ACCOUNT FUNDING_INSTRUMENT].each do |entity|
+      context "when ENGAGEMENT is requested for #{entity}, which does not report clicks" do
+        let(:column_names) { guessed_column_names(entity: entity, metric_groups: ['ENGAGEMENT']) }
 
-      it 'does not offer link_clicks' do
-        expect(column_names).not_to include('link_clicks')
-      end
+        it 'does not offer link_clicks' do
+          expect(column_names).not_to include('link_clicks')
+        end
 
-      it 'does not offer url_clicks' do
-        expect(column_names).not_to include('url_clicks')
+        it 'does not offer url_clicks' do
+          expect(column_names).not_to include('url_clicks')
+        end
       end
     end
 
