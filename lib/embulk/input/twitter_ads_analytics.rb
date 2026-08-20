@@ -125,9 +125,15 @@ module Embulk
           {name: "card_engagements", type: "long"},
           {name: "clicks", type: "long"},
           {name: "app_clicks", type: "long"},
+          # X stopped returning url_clicks around 2026-04-29 without any announcement, and now
+          # returns link_clicks instead. url_clicks is kept because it is still documented.
+          # @see https://docs.x.com/x-ads-api/analytics
           {name: "url_clicks", type: "long"},
           {name: "qualified_impressions", type: "long"},
-        ] if metric_groups.include?("ENGAGEMENT") && (entity != "ACCOUNT" && entity != "FUNDING_INSTRUMENT")
+          # Appended rather than placed next to url_clicks so that regenerating a config with
+          # `embulk guess` does not shift the position of any pre-existing column.
+          {name: "link_clicks", type: "long"},
+        ] if metric_groups.include?("ENGAGEMENT") && reports_click_metrics?(entity)
         columns += [
           {name: "engagements", type: "long"},
           {name: "impressions", type: "long"},
@@ -135,7 +141,7 @@ module Embulk
           {name: "replies", type: "long"},
           {name: "likes", type: "long"},
           {name: "follows", type: "long"},
-        ] if metric_groups.include?("ENGAGEMENT") && (entity == "ACCOUNT" || entity == "FUNDING_INSTRUMENT")
+        ] if metric_groups.include?("ENGAGEMENT") && !reports_click_metrics?(entity)
         columns += [
           {name: "billed_engagements", type: "long"},
           {name: "billed_charge_local_micro", type: "long"},
@@ -202,6 +208,12 @@ module Embulk
           {name: "mobile_conversion_lifetime_value_rates", type: "json"},
         ] if metric_groups.include?("LIFE_TIME_VALUE_MOBILE_CONVERSION")
         return {"columns" => columns}
+      end
+
+      # ACCOUNT and FUNDING_INSTRUMENT report a reduced ENGAGEMENT metric set with no click metrics.
+      # @see https://docs.x.com/x-ads-api/analytics
+      def self.reports_click_metrics?(entity)
+        entity != "ACCOUNT" && entity != "FUNDING_INSTRUMENT"
       end
 
       def init

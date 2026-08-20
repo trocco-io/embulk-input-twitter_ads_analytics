@@ -46,6 +46,53 @@ RSpec.describe Embulk::Input::TwitterAdsAnalytics do
     "https://ads-api.twitter.com/12/stats/jobs/accounts/#{account_id}?job_ids=#{encoded}"
   end
 
+  describe '.guess' do
+    def guessed_column_names(entity:, metric_groups:)
+      config = double('config')
+      allow(config).to receive(:param).with('entity', :string).and_return(entity)
+      allow(config).to receive(:param).with('metric_groups', :array).and_return(metric_groups)
+      described_class.guess(config)['columns'].map { |column| column[:name] }
+    end
+
+    context 'when ENGAGEMENT is requested for an entity that reports clicks' do
+      let(:column_names) { guessed_column_names(entity: 'CAMPAIGN', metric_groups: ['ENGAGEMENT']) }
+
+      it 'offers link_clicks, which replaced url_clicks in the API response' do
+        expect(column_names).to include('link_clicks')
+      end
+
+      it 'keeps offering url_clicks, which is still documented' do
+        expect(column_names).to include('url_clicks')
+      end
+
+      it 'appends link_clicks last, so no pre-existing column changes position' do
+        expect(column_names.last).to eq('link_clicks')
+      end
+    end
+
+    %w[ACCOUNT FUNDING_INSTRUMENT].each do |entity|
+      context "when ENGAGEMENT is requested for #{entity}, which does not report clicks" do
+        let(:column_names) { guessed_column_names(entity: entity, metric_groups: ['ENGAGEMENT']) }
+
+        it 'does not offer link_clicks' do
+          expect(column_names).not_to include('link_clicks')
+        end
+
+        it 'does not offer url_clicks' do
+          expect(column_names).not_to include('url_clicks')
+        end
+      end
+    end
+
+    context 'when ENGAGEMENT is not requested' do
+      let(:column_names) { guessed_column_names(entity: 'CAMPAIGN', metric_groups: ['BILLING']) }
+
+      it 'does not offer link_clicks' do
+        expect(column_names).not_to include('link_clicks')
+      end
+    end
+  end
+
   describe '#poll_job_status' do
     before do
       allow(Embulk.logger).to receive(:info)
