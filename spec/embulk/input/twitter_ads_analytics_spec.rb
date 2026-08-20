@@ -93,6 +93,127 @@ RSpec.describe Embulk::Input::TwitterAdsAnalytics do
     end
   end
 
+  describe '#run' do
+    # date and campaign_id are handled by branches above the metrics lookup, so they must never be
+    # reported as missing metrics.
+    let(:columns) do
+      [
+        { 'name' => 'date', 'type' => 'timestamp' },
+        { 'name' => 'campaign_id', 'type' => 'string' },
+        { 'name' => 'clicks', 'type' => 'long' },
+        { 'name' => 'url_clicks', 'type' => 'long' },
+        { 'name' => 'link_clicks', 'type' => 'long' },
+      ]
+    end
+
+    let(:page_builder) { double('page_builder', add: nil, finish: nil) }
+    let(:warnings) { [] }
+
+    let(:plugin) do
+      instance = described_class.allocate
+      {
+        '@account_id' => account_id,
+        '@entity' => 'CAMPAIGN',
+        '@metric_groups' => ['ENGAGEMENT'],
+        '@granularity' => 'DAY',
+        '@placement' => 'ALL_ON_TWITTER',
+        '@start_date' => '2026-08-01',
+        '@end_date' => '2026-08-01',
+        '@timezone' => 'UTC',
+        '@columns' => columns,
+        '@request_entities_limit' => 1000,
+      }.each { |name, value| instance.instance_variable_set(name, value) }
+      instance
+    end
+
+    # One stats item per given metrics hash, each belonging to its own campaign.
+    def stub_api(*metrics_per_item)
+      allow(plugin).to receive(:page_builder).and_return(page_builder)
+      allow(plugin).to receive(:get_access_token).and_return(access_token)
+      allow(plugin).to receive(:request_entities).and_return(
+        Array.new(metrics_per_item.length) { |i| { 'id' => "campaign_#{i}" } }
+      )
+      allow(plugin).to receive(:request_stats).and_return(
+        metrics_per_item.each_with_index.map do |metrics, i|
+          { 'id' => "campaign_#{i}", 'id_data' => [{ 'metrics' => metrics }] }
+        end
+      )
+    end
+
+    def reported_missing_metrics
+      expect(warnings.length).to eq(1)
+      warnings.first[/filled with NULL: (.+?)\./, 1].split(', ')
+    end
+
+    before do
+      Time.zone = 'UTC'
+      allow(Embulk.logger).to receive(:info)
+      allow(Embulk.logger).to receive(:warn) { |message| warnings << message }
+    end
+
+    context 'when a configured metric is absent from the response' do
+      before { stub_api({ 'clicks' => [10], 'link_clicks' => [7] }) }
+
+      it 'warns naming only the absent metric' do
+        plugin.run
+        expect(reported_missing_metrics).to contain_exactly('url_clicks')
+      end
+
+      it 'still writes the same row, with NULL for the absent metric' do
+        plugin.run
+        expect(page_builder).to have_received(:add)
+          .with([Time.zone.parse('2026-08-01'), 'campaign_0', 10, nil, 7])
+      end
+    end
+
+    context 'when every configured metric is present' do
+      before { stub_api({ 'clicks' => [10], 'url_clicks' => [3], 'link_clicks' => [7] }) }
+
+      it 'does not warn' do
+        plugin.run
+        expect(warnings).to be_empty
+      end
+    end
+
+    context 'when a metric key is present but null' do
+      before { stub_api({ 'clicks' => [10], 'url_clicks' => nil, 'link_clicks' => [7] }) }
+
+      it 'does not warn, because the metric was returned and simply has no value' do
+        plugin.run
+        expect(warnings).to be_empty
+      end
+
+      it 'writes NULL for it, as before' do
+        plugin.run
+        expect(page_builder).to have_received(:add)
+          .with([Time.zone.parse('2026-08-01'), 'campaign_0', 10, nil, 7])
+      end
+    end
+
+    context 'when a metric is absent for one entity but returned for another' do
+      before do
+        stub_api(
+          { 'clicks' => [10], 'link_clicks' => [7] },
+          { 'clicks' => [20], 'url_clicks' => [5], 'link_clicks' => [9] },
+        )
+      end
+
+      it 'does not warn, because X omits keys for entities with no activity' do
+        plugin.run
+        expect(warnings).to be_empty
+      end
+    end
+
+    context 'when no stats are returned at all' do
+      before { stub_api }
+
+      it 'does not warn, because nothing was requested of the API' do
+        plugin.run
+        expect(warnings).to be_empty
+      end
+    end
+  end
+
   describe '#poll_job_status' do
     before do
       allow(Embulk.logger).to receive(:info)

@@ -1,3 +1,5 @@
+require "set"
+
 require "oauth"
 require "active_support"
 require "active_support/core_ext/date"
@@ -299,6 +301,8 @@ module Embulk
           end
         end
         Embulk.logger.info "Completed async processing, total stats collected: #{stats.length}"
+        requested_metrics = Set.new
+        returned_metrics = Set.new
         stats.each do |item|
           metrics = item["id_data"][0]["metrics"]
           (Date.parse(item["start_date"])..Date.parse(item["end_date"])).each_with_index do |date, i|
@@ -324,6 +328,8 @@ module Embulk
               elsif column["name"] == "description"
                 page << entities.find { |entity| entity["id"] == item["id"] }["description"]
               else
+                requested_metrics << column["name"]
+                returned_metrics << column["name"] if metrics.key?(column["name"])
                 if !metrics[column["name"]]
                   page << nil
                 elsif column["type"] == "json"
@@ -336,6 +342,7 @@ module Embulk
             page_builder.add(page)
           end
         end
+        warn_metrics_missing_from_response(requested_metrics - returned_metrics)
         page_builder.finish
 
         task_report = {}
@@ -670,6 +677,22 @@ module Embulk
 
       def has_line_item_id?(entity)
         entity == "PROMOTED_TWEET" || entity == "MEDIA_CREATIVE"
+      end
+
+      # A configured column whose key is absent from the response is filled with NULL, which is
+      # indistinguishable from "the metric is null for this period". X has removed metrics without
+      # announcing it or updating the documentation before (url_clicks around 2026-04-29), so warn
+      # to make the next such change visible in the job log instead of only in the loaded data.
+      #
+      # Only metrics absent from *every* response are reported: X omits keys for entities with no
+      # activity in the period, so a per-response check would warn on healthy transfers.
+      def warn_metrics_missing_from_response(missing_metric_names)
+        return if missing_metric_names.empty?
+
+        Embulk.logger.warn "These configured columns were absent from every X Ads API response and were " \
+                           "filled with NULL: #{missing_metric_names.sort.join(", ")}. " \
+                           "X may have renamed or removed the metrics; check them against " \
+                           "https://docs.x.com/x-ads-api/analytics and reload the column definitions."
       end
 
       def get_sleep_sec(response:, retries:)
