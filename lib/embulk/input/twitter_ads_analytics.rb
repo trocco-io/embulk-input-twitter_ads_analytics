@@ -125,7 +125,11 @@ module Embulk
           {name: "card_engagements", type: "long"},
           {name: "clicks", type: "long"},
           {name: "app_clicks", type: "long"},
+          # X stopped returning url_clicks around 2026-04-29 without any announcement, and now
+          # returns link_clicks instead. url_clicks is kept because it is still documented.
+          # @see https://docs.x.com/x-ads-api/analytics
           {name: "url_clicks", type: "long"},
+          {name: "link_clicks", type: "long"},
           {name: "qualified_impressions", type: "long"},
         ] if metric_groups.include?("ENGAGEMENT") && (entity != "ACCOUNT" && entity != "FUNDING_INSTRUMENT")
         columns += [
